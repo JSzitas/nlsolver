@@ -677,6 +677,15 @@ private:
         x = agents[best_id];
         return solver_status<scalar_t>(scores[best_id], iter, function_calls_used);
       }
+      // only for strategy best do we need to keep track of how good all solutions are 
+      if constexpr(recomb == best) {
+        for( size_t i = 0; i < scores.size(); i++) {
+          if( scores[i] < scores[best_id] ) {
+            best_id = i;
+          }
+        }
+      }
+      // main loop - this can in principle be parallelized
       for( size_t i = 0; i < agents.size(); i++) {
         // generate agent indices - either using the best or the current agent
         if constexpr(recomb == random) {
@@ -696,14 +705,6 @@ private:
         if(scores[i] > score) {
           for( size_t j = 0; j < proposal_temp.size(); j++ ) {
             agents[i][j] = proposal_temp[j];
-          }
-        }
-      }
-      // only for strategy best do we need to keep track of how good all solutions are 
-      if constexpr(recomb == best) {
-        for( size_t i = 0; i < scores.size(); i++) {
-          if( scores[i] < scores[best_id] ) {
-            best_id = i;
           }
         }
       }
