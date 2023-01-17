@@ -1,6 +1,14 @@
 #ifndef NLSOLVER
 #define NLSOLVER
 
+#include <vector>
+#include <array>
+#include <tuple>
+#include <unordered_set>
+
+#include <iostream>
+#include "cmath"
+
 namespace nlsolver::rng {
 
 #include <stdint.h>
@@ -198,11 +206,11 @@ private:
 
 namespace nlsolver{
 
-template <typename scalar_t = double> static inline scalar_t max_vec(const std::vector<scalar_t>& x) {
-  auto result = x[0];
+template <typename scalar_t = double> static inline scalar_t max_abs_vec(const std::vector<scalar_t>& x) {
+  auto result = abs(x[0]);
   for(size_t i =1; i < x.size(); i++) {
-    if(result < x[i]) {
-      result = x[i];
+    if(result < abs(x[i])) {
+      result = abs(x[i]);
     }
   }
   return result;
@@ -222,7 +230,7 @@ template <typename scalar_t = double> struct simplex {
     // default initialization
     if(step < 0) {
       // get infinity norm of initial vector
-      scalar_t x_inf_norm = max_vec(x);
+      scalar_t x_inf_norm = max_abs_vec(x);
       // if smaller than 1, set to 1
       scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
       // if larger than 10, set to 10
