@@ -628,7 +628,7 @@ public:
       const scalar_t eps = 10e-4,
       const size_t pop_size = 100,
       const size_t max_iter = 10000,
-      Recombination recomb = random) : 
+      Recombination recomb = best) : 
   f(f), generator(generator), crossover_prob(crossover_prob),
   differential_weight(differential_weight), eps(eps), pop_size(pop_size),
   max_iter(max_iter), recomb(recomb) {}
@@ -647,7 +647,7 @@ public:
     return this->solve<false, best>(x);
   }
 private:
-  template <const bool minimize=true, Recombination recomb = random>
+  template <const bool minimize=true, Recombination recomb = best>
   solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
 
     std::vector<std::vector<scalar_t>> agents = init_agents(x,
