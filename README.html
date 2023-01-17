@@ -374,30 +374,14 @@ no complex includes, no additional magic. Just copy the header into your
 project, include and happily use:</p>
 <pre class="cpp"><code>#include &quot;nlsolver.h&quot;</code></pre>
 </div>
-<div id="design-characteristics" class="section level1">
-<h1>Design characteristics</h1>
-<p>There are some design decisions in this library taken to achieve the
-main goals (i.e. simplicity, flexibility, ease of use, no
-dependencies):</p>
+<div id="solvers" class="section level1">
+<h1>Solvers:</h1>
 <ul>
-<li>the objective functions to minimize/ maximize are passed as
-functors, requiring an overloaded <strong>public</strong>
-<strong>()</strong> operator which takes a
-<strong>std::vector<T></strong>, e.g. </li>
+<li>Nelder-Mead</li>
+<li>Differential Evolution</li>
+<li>CVA-ES <em>[Work in progress]</em></li>
+<li>Particle Swarm Optimization <em>[planned]</em></li>
 </ul>
-<pre class="cpp"><code>struct example {
-  double operator()( std::vector&lt;double&gt; &amp;x) {
-    return (x[0] + x[1])/(1-x[2]);
-  }
-};</code></pre>
-<ul>
-<li>there are no virtual calls in this library - much additional
-functionality is achieved entirely via templates, and the interfaces are
-made to be as similar as possible</li>
-</ul>
-<p>Additionally, this library also includes a set of (pseudo)-random and
-(quasi)-random number generators that also aim to get out of the way as
-much as possible.</p>
 </div>
 <div id="example-usage" class="section level1">
 <h1>Example usage:</h1>
@@ -432,16 +416,34 @@ int main() {
   for( auto &amp;val:init) {
     std::cout &lt;&lt; val &lt;&lt; &quot;,&quot; &lt;&lt; std::endl;
   }
-  
-  // Differential evolution solver - also requires random number generator
-  xorshift&lt;double&gt; gen;
-  auto problem = DESolver&lt;Rosenbrock, xorshift&lt;double&gt;, double&gt;(rosenbrock_prob, gen);
-  std::vector&lt;double&gt; init = {0,0};
-  auto res = problem.minimize(init);
-  res.print();
 
   return 0;
 }</code></pre>
+</div>
+<div id="design-notes" class="section level1">
+<h1>Design notes</h1>
+<p>There are some design decisions in this library taken to achieve the
+main goals (i.e. simplicity, flexibility, ease of use, no
+dependencies):</p>
+<ul>
+<li>the objective functions to minimize/ maximize are passed as
+functors, requiring an overloaded <strong>public</strong>
+<strong>()</strong> operator which takes a
+<strong>std::vector<T></strong>, e.g. </li>
+</ul>
+<pre class="cpp"><code>struct example {
+  double operator()( std::vector&lt;double&gt; &amp;x) {
+    return (x[0] + x[1])/(1-x[2]);
+  }
+};</code></pre>
+<ul>
+<li>there are no virtual calls in this library - much additional
+functionality is achieved entirely via templates, and the interfaces are
+made to be as similar as possible</li>
+</ul>
+<p>Additionally, this library also includes a set of (pseudo)-random and
+(quasi)-random number generators that also aim to get out of the way as
+much as possible.</p>
 </div>
 <div id="contributing" class="section level1">
 <h1>Contributing</h1>

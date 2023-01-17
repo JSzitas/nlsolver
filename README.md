@@ -7,27 +7,13 @@ no additional magic. Just copy the header into your project, include and happily
 #include "nlsolver.h"
 ```
 
-# Design characteristics
+# Solvers: 
 
-There are some design decisions in this library taken to achieve the main goals 
-(i.e. simplicity, flexibility, ease of use, no dependencies): 
+* Nelder-Mead 
+* Differential Evolution 
+* CVA-ES *[Work in progress]*
+* Particle Swarm Optimization *[planned]*
 
-* the objective functions to minimize/ maximize are passed as functors, 
-requiring an overloaded **public** **()** operator which takes a **std::vector<T>**, e.g. 
-```cpp
-struct example {
-  double operator()( std::vector<double> &x) {
-    return (x[0] + x[1])/(1-x[2]);
-  }
-};
-```
-
-* there are no virtual calls in this library - much additional functionality is achieved 
-  entirely via templates, and the interfaces are made to be as similar as possible 
-  
-Additionally, this library also includes a set of (pseudo)-random and (quasi)-random number generators
-that also aim to get out of the way as much as possible. 
-  
 # Example usage: 
 
 Solving the Rosenbrock function 
@@ -63,17 +49,29 @@ int main() {
   for( auto &val:init) {
     std::cout << val << "," << std::endl;
   }
-  
-  // Differential evolution solver - also requires random number generator
-  xorshift<double> gen;
-  auto problem = DESolver<Rosenbrock, xorshift<double>, double>(rosenbrock_prob, gen);
-  std::vector<double> init = {0,0};
-  auto res = problem.minimize(init);
-  res.print();
 
   return 0;
 }
 ```
+
+# Design notes
+
+There are some design decisions in this library which warrant discussion: 
+
+* the objective functions to minimize/ maximize are always passed as functors, 
+requiring an overloaded **public** **()** operator which takes a **std::vector<T>**, e.g. 
+```cpp
+struct example {
+  double operator()( std::vector<double> &x) {
+    return (x[0] + x[1])/(1-x[2]);
+  }
+};
+```
+
+* there are no virtual calls in this library - thus incurring no performance penalty
+  
+Additionally, this library also includes a set of (pseudo)-random and (quasi)-random number generators
+that also aim to get out of the way as much as possible, all of which are also immplemented as functors.   
   
 # Contributing
 
