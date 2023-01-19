@@ -64,12 +64,12 @@ int main() {
   xorshift<double> gen;
   // again initialize solver, this time also with the RNG
   auto de_solver = DESolver<Rosenbrock, xorshift<double>, double> (prob, gen);
-  
+
   std::vector<double> de_init = {5,7};;
   auto de_res = de_solver.minimize(de_init);
   de_res.print();
   print_vector(de_init);
-  
+
   std::cout << "Differential evolution with std::mt19937" << std::endl;
   // using standard library random number generators
   std_MT std_gen;
@@ -80,13 +80,13 @@ int main() {
   de_res = de_solver_MT.minimize(de_init);
   de_res.print();
   print_vector(de_init);
-  
+
   std::cout << "Particle Swarm Optimization with xoroshift" << std::endl;
   // using standard library random number generators
   xoshiro<double> xos_gen;
   std::vector<double> lower = {-5, -5};
   std::vector<double> upper = {5, 5};
-  
+
   // again initialize solver, this time also with the RNG
   auto pso_solver = PSOSolver<Rosenbrock,
                               xoshiro<double>,
