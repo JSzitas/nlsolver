@@ -9,201 +9,6 @@
 #include <iostream>
 #include "cmath"
 
-namespace nlsolver::rng {
-
-#include <stdint.h>
-#define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
-
-uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
-  return (x << rotate_bits) | (x >> (bits - rotate_bits));
-}
-
-template <typename scalar_t = float> struct halton {
-  halton<scalar_t>(){
-    b=2;
-    y = 1;
-    n=0;
-    d=1;
-    x = 1;
-  };
-  scalar_t yield(){
-    x = d-n;
-    if(x == 1){
-      n = 1;
-      d *= b;
-    }
-    else {
-      y = d;
-      while(x <= y) {
-        y /= b;
-        n = (b + 1) * y - x;
-      }
-    }
-    return (scalar_t)(n/d);
-  };
-  scalar_t operator ()() {
-    return this->yield();
-  }
-  void set( scalar_t base ) {
-    b = base;
-    y = 1;
-    n = 0;
-    d = 1;
-    x = 1;
-  };
-  void reset(){
-    b=2;
-    y = 1;
-    n = 0;
-    d = 1;
-    x = 1;
-  };
-private:
-  scalar_t b, y, n, d, x;
-};
-
-
-template <typename scalar_t = float> struct recurrent {
-  recurrent<scalar_t>(){
-    seed = 0.5;
-    alpha = 0.618034;
-    z = alpha + seed;
-    z -= (scalar_t)(uint64_t)(z);
-  };
-  recurrent( scalar_t init_seed ) {
-    seed = init_seed;
-    alpha = 0.618034;
-    z = alpha + seed;
-    z -= (scalar_t)(uint64_t)(z);
-  };
-  scalar_t yield() {
-    z = (z+alpha);
-    // a slightly evil way to do z % 1 with floats
-    z -= (scalar_t)(uint64_t)(z);
-    return z;
-  };
-  scalar_t operator ()() {
-    return this->yield();
-  }
-  void reset(){
-    alpha = 0.618034;
-    seed = 0.5;
-    z = 0;
-  };
-private:
-  scalar_t alpha = 0.618034, seed = 0.5, z = 0;
-};
-
-template <typename scalar_t = float> struct splitmix {
-  splitmix<scalar_t>(){
-    s = 12374563468;
-  };
-  scalar_t yield() {
-    uint64_t result = (s += 0x9E3779B97f4A7C15);
-    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
-    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
-    return (scalar_t)(result ^ (result >> 31))/(scalar_t)MAX_SIZE_64_BIT_UINT;
-  };
-  scalar_t operator ()() {
-    return this->yield();
-  }
-  uint64_t yield_init() {
-    uint64_t result = (s += 0x9E3779B97f4A7C15);
-    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
-    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
-    return result ^ (result >> 31);
-  };
-  void set( uint64_t x ) {
-    s = x;
-  };
-private:
-  uint64_t s;
-};
-
-template <typename scalar_t = float> struct xoshiro {
-  xoshiro<scalar_t>(){
-    splitmix<scalar_t> gn;
-    s[0] = gn.yield_init();
-    s[1] = s[0] >> 32;
-    
-    s[2] = gn.yield();
-    s[3] = s[2] >> 32;
-  };
-  scalar_t yield(){
-    uint64_t const result = s[0] + s[3];
-    uint64_t const t = s[1] << 17;
-    
-    s[2] ^= s[0];
-    s[3] ^= s[1];
-    s[1] ^= s[2];
-    s[0] ^= s[3];
-    
-    s[2] ^= t;
-    s[3] = bitwise_rotate(s[3], 64, 45);
-    
-    return (scalar_t)result/(scalar_t)MAX_SIZE_64_BIT_UINT;
-  }
-  scalar_t operator ()() {
-    return this->yield();
-  }
-  void reset(){
-    splitmix<scalar_t> gn;
-    s[0] = gn.yield_init();
-    s[1] = s[0] >> 32;
-    
-    s[2] = gn.yield();
-    s[3] = s[2] >> 32;
-  };
-  void set( uint64_t x,
-            uint64_t y,
-            uint64_t z,
-            uint64_t t) {
-    s[0] = x;
-    s[1] = y;
-    s[2] = z;
-    s[3] = t;
-  };
-private:
-  uint64_t rol64(uint64_t x, int k)
-  {
-    return (x << k) | (x >> (64 - k));
-  }
-  uint64_t s[4];
-};
-
-template <typename scalar_t = float> struct xorshift {
-  xorshift<scalar_t>() {
-    splitmix<scalar_t> gn;
-    x[0] = gn.yield_init();
-    x[1] = x[0] >> 32;
-  };
-  scalar_t yield() {
-    uint64_t t = x[0];
-    uint64_t const s = x[1];
-    x[0] = s;
-    t ^= t << 23;		// a
-    t ^= t >> 18;		// b -- Again, the shifts and the multipliers are tunable
-    t ^= s ^ (s >> 5);	// c
-    x[1] = t;
-    return (scalar_t)(t + s)/(scalar_t)MAX_SIZE_64_BIT_UINT;
-  };
-  scalar_t operator ()() {
-    return this->yield();
-  }
-  void reset(){
-    splitmix<scalar_t> gn;
-    x[0] = gn.yield_init();
-    x[1] = x[0] >> 32;
-  };
-  void set( uint64_t y, uint64_t z ) {
-    x[0] = y;
-    x[1] = z;
-  };
-private:
-  uint64_t x[2];
-};
-}
-
 namespace nlsolver{
 
 template <typename scalar_t = double> static inline scalar_t max_abs_vec(const std::vector<scalar_t>& x) {
@@ -616,7 +421,7 @@ private:
   Callable f;
   RNG generator;
   const scalar_t crossover_prob, differential_weight, eps; 
-  const size_t pop_size, max_iter;
+  const size_t pop_size, max_iter, best_value_no_change;
   const Recombination recomb;
 public:
   // constructor
@@ -628,10 +433,11 @@ public:
       const scalar_t eps = 10e-4,
       const size_t pop_size = 100,
       const size_t max_iter = 10000,
+      const size_t best_val_no_change = 50,
       Recombination recomb = best) : 
   f(f), generator(generator), crossover_prob(crossover_prob),
   differential_weight(differential_weight), eps(eps), pop_size(pop_size),
-  max_iter(max_iter), recomb(recomb) {}
+  max_iter(max_iter), best_value_no_change(best_val_no_change), recomb(recomb) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
     if(this->recomb == random) {
@@ -665,25 +471,25 @@ private:
     size_t function_calls_used = agents.size();
     scalar_t score = 0;
     size_t iter = 0; 
-    size_t best_id = 0;
+    size_t best_id = 0, val_no_change = 0;
+    bool not_updated = true;
     while(true) {
-      // if agents have stabilized, return
-      if( iter >= this->max_iter || std_err(scores) < this->eps ) {
-        for( size_t i = 1; i < scores.size(); i++) {
-          if( scores[i] < scores[best_id] ) {
-            best_id = i;
-          }
+      not_updated = true;
+      // track how good the solutions are
+      for( size_t i = 0; i < scores.size(); i++) {
+        if( scores[i] < scores[best_id] ) {
+          best_id = i;
+          not_updated = false;
         }
+      }
+      // if we did not update the best function value, increment counter 
+      val_no_change = not_updated * (val_no_change+1);
+      // if agents have stabilized, return
+      if( iter >= this->max_iter || 
+          val_no_change >= this->best_value_no_change || 
+          std_err(scores) < this->eps ) {
         x = agents[best_id];
         return solver_status<scalar_t>(scores[best_id], iter, function_calls_used);
-      }
-      // only for strategy best do we need to keep track of how good all solutions are 
-      if constexpr(recomb == best) {
-        for( size_t i = 0; i < scores.size(); i++) {
-          if( scores[i] < scores[best_id] ) {
-            best_id = i;
-          }
-        }
       }
       // main loop - this can in principle be parallelized
       for( size_t i = 0; i < agents.size(); i++) {
@@ -706,6 +512,8 @@ private:
           for( size_t j = 0; j < proposal_temp.size(); j++ ) {
             agents[i][j] = proposal_temp[j];
           }
+          scores[i] = score;
+          // std::cout << "agent updated: " << i << " new score: "<< score << std::endl;
         }
       }
       // increment iteration counter
@@ -724,7 +532,7 @@ private:
   const scalar_t eps;
   // static, derived from above 
   size_t n_dim;
-  const size_t n_particles;
+  const size_t n_particles, best_val_no_change;
   // internally created
   std::vector<std::vector<scalar_t>> particle_positions;
   std::vector<std::vector<scalar_t>> particle_velocities;
@@ -733,7 +541,7 @@ private:
   std::vector<scalar_t> swarm_best_position;
   scalar_t swarm_best_value;
   // book-keeping
-  size_t f_evals;
+  size_t f_evals, val_no_change;
   const size_t max_iter;
 public:
   PSOSolver<Callable, RNG, scalar_t>( Callable &f,
@@ -743,11 +551,14 @@ public:
                                       scalar_t social_coef = 1.8,
                                       const size_t n_particles = 10,
                                       const size_t max_iter = 5000,
+                                      const size_t best_val_no_change = 30,
                                       const scalar_t eps = 10e-4) :
   generator(generator), f(f), inertia(inertia), cognitive_coef(cognitive_coef),
-  social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), eps(eps) {
-    this->swarm_best_value = 0.0;
+  social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), 
+  best_val_no_change(best_val_no_change), eps(eps) {
+    this->swarm_best_value = 100000.0;
     this->f_evals = 0;
+    this-> val_no_change = 0;
   }
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x, 
@@ -768,8 +579,11 @@ private:
     size_t iter = 0;
     this->update_best_positions(minimize);
     while(true) {
-      // if agents have stabilized, return
-      if( iter >= this->max_iter || std_err(this->particle_best_values) < this->eps ) {
+      // if particles have stabilized (no improvement in objective iteration or 
+      // no heterogeneity of particles) or we are over the limit, return
+      if( iter >= this->max_iter ||
+          val_no_change >= best_val_no_change ||
+          std_err(this->particle_best_values) < this->eps ) {
         x = this->swarm_best_position;
         // best scores, iteration number and function calls used total
         return solver_status<scalar_t>(this->swarm_best_value, iter, this->f_evals);
@@ -866,6 +680,9 @@ private:
       }
     }
     this->swarm_best_position = this->particle_positions[best_index];
+    // either increment to indicate no change in best objective value, 
+    // or reset to 0
+    this->val_no_change = (best_index == 0) * (this->val_no_change+1);
   }
 };
 
@@ -891,5 +708,200 @@ private:
   }
 };
 };
+
+namespace nlsolver::rng {
+
+#include <stdint.h>
+#define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
+
+uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
+  return (x << rotate_bits) | (x >> (bits - rotate_bits));
+}
+
+template <typename scalar_t = float> struct halton {
+  halton<scalar_t>(){
+    b=2;
+    y = 1;
+    n=0;
+    d=1;
+    x = 1;
+  };
+  scalar_t yield(){
+    x = d-n;
+    if(x == 1){
+      n = 1;
+      d *= b;
+    }
+    else {
+      y = d;
+      while(x <= y) {
+        y /= b;
+        n = (b + 1) * y - x;
+      }
+    }
+    return (scalar_t)(n/d);
+  };
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  void set( scalar_t base ) {
+    b = base;
+    y = 1;
+    n = 0;
+    d = 1;
+    x = 1;
+  };
+  void reset(){
+    b=2;
+    y = 1;
+    n = 0;
+    d = 1;
+    x = 1;
+  };
+private:
+  scalar_t b, y, n, d, x;
+};
+
+
+template <typename scalar_t = float> struct recurrent {
+  recurrent<scalar_t>(){
+    seed = 0.5;
+    alpha = 0.618034;
+    z = alpha + seed;
+    z -= (scalar_t)(uint64_t)(z);
+  };
+  recurrent( scalar_t init_seed ) {
+    seed = init_seed;
+    alpha = 0.618034;
+    z = alpha + seed;
+    z -= (scalar_t)(uint64_t)(z);
+  };
+  scalar_t yield() {
+    z = (z+alpha);
+    // a slightly evil way to do z % 1 with floats
+    z -= (scalar_t)(uint64_t)(z);
+    return z;
+  };
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  void reset(){
+    alpha = 0.618034;
+    seed = 0.5;
+    z = 0;
+  };
+private:
+  scalar_t alpha = 0.618034, seed = 0.5, z = 0;
+};
+
+template <typename scalar_t = float> struct splitmix {
+  splitmix<scalar_t>(){
+    s = 12374563468;
+  };
+  scalar_t yield() {
+    uint64_t result = (s += 0x9E3779B97f4A7C15);
+    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return (scalar_t)(result ^ (result >> 31))/(scalar_t)MAX_SIZE_64_BIT_UINT;
+  };
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  uint64_t yield_init() {
+    uint64_t result = (s += 0x9E3779B97f4A7C15);
+    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return result ^ (result >> 31);
+  };
+  void set( uint64_t x ) {
+    s = x;
+  };
+private:
+  uint64_t s;
+};
+
+template <typename scalar_t = float> struct xoshiro {
+  xoshiro<scalar_t>(){
+    splitmix<scalar_t> gn;
+    s[0] = gn.yield_init();
+    s[1] = s[0] >> 32;
+    
+    s[2] = gn.yield();
+    s[3] = s[2] >> 32;
+  };
+  scalar_t yield(){
+    uint64_t const result = s[0] + s[3];
+    uint64_t const t = s[1] << 17;
+    
+    s[2] ^= s[0];
+    s[3] ^= s[1];
+    s[1] ^= s[2];
+    s[0] ^= s[3];
+    
+    s[2] ^= t;
+    s[3] = bitwise_rotate(s[3], 64, 45);
+    
+    return (scalar_t)result/(scalar_t)MAX_SIZE_64_BIT_UINT;
+  }
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  void reset(){
+    splitmix<scalar_t> gn;
+    s[0] = gn.yield_init();
+    s[1] = s[0] >> 32;
+    
+    s[2] = gn.yield();
+    s[3] = s[2] >> 32;
+  };
+  void set( uint64_t x,
+            uint64_t y,
+            uint64_t z,
+            uint64_t t) {
+    s[0] = x;
+    s[1] = y;
+    s[2] = z;
+    s[3] = t;
+  };
+private:
+  uint64_t rol64(uint64_t x, int k)
+  {
+    return (x << k) | (x >> (64 - k));
+  }
+  uint64_t s[4];
+};
+
+template <typename scalar_t = float> struct xorshift {
+  xorshift<scalar_t>() {
+    splitmix<scalar_t> gn;
+    x[0] = gn.yield_init();
+    x[1] = x[0] >> 32;
+  };
+  scalar_t yield() {
+    uint64_t t = x[0];
+    uint64_t const s = x[1];
+    x[0] = s;
+    t ^= t << 23;		// a
+    t ^= t >> 18;		// b -- Again, the shifts and the multipliers are tunable
+    t ^= s ^ (s >> 5);	// c
+    x[1] = t;
+    return (scalar_t)(t + s)/(scalar_t)MAX_SIZE_64_BIT_UINT;
+  };
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  void reset(){
+    splitmix<scalar_t> gn;
+    x[0] = gn.yield_init();
+    x[1] = x[0] >> 32;
+  };
+  void set( uint64_t y, uint64_t z ) {
+    x[0] = y;
+    x[1] = z;
+  };
+private:
+  uint64_t x[2];
+};
+}
 
 #endif
