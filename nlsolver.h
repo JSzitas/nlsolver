@@ -59,6 +59,40 @@ template <typename scalar_t = double> struct simplex {
     }
     this->vals = init_simplex;
   }
+  void restart( const std::vector<scalar_t> &x, const scalar_t step = 1) {
+    std::vector<std::vector<scalar_t>> init_simplex(x.size() + 1);
+    init_simplex[0] = x;
+    // this follows Gao and Han, see:
+    // 'Proper initialization is crucial for the Nelder–Mead simplex search.' (2019),
+    // Wessing, S.  Optimization Letters 13, p. 847–856 
+    // (also at https://link.springer.com/article/10.1007/s11590-018-1284-4)
+    // default initialization
+    if(step < 0) {
+      // get infinity norm of initial vector
+      scalar_t x_inf_norm = max_abs_vec(x);
+      // if smaller than 1, set to 1
+      scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
+      // if larger than 10, set to 10
+      scalar_t scale = a < 10 ? a : 10;
+      for( size_t i = 1; i < init_simplex.size(); i++ ) {
+        init_simplex[i] = x;
+        init_simplex[i][i] = x[i] + scale;
+      }
+      // update first simplex point
+      scalar_t n = (scalar_t)x.size();
+      for( size_t i = 0; i < x.size(); i++ ) {
+        init_simplex[0][i] = x[i] + ((1.0 - sqrt(n + 1.0 ))/n * scale);
+      }
+    }
+    // otherwise, first element of simplex has unchanged starting values 
+    else {
+      for( size_t i = 1; i < init_simplex.size(); i++ ) {
+        init_simplex[i] = x;
+        init_simplex[i][i] = x[i] + step;
+      }
+    }
+    this->vals = init_simplex;
+  }
   simplex<scalar_t>( std::vector<std::vector<scalar_t>> &vals ) : vals(std::move(vals)) {}
   const size_t size() const { return this->vals.size(); }
   void replace( std::vector<scalar_t> & new_val, const size_t at ) {
@@ -210,8 +244,8 @@ public:
                                          const scalar_t eps = 10e-4,
                                          const size_t no_change_best_tol = 100) : f(f), step(step),
                                          alpha(alpha), gamma(gamma), rho(rho),
-                                         sigma(sigma), eps(eps),
-                                         max_iter(max_iter), no_change_best_tol(no_change_best_tol) {}
+                                         sigma(sigma), max_iter(max_iter), 
+                                         eps(eps), no_change_best_tol(no_change_best_tol) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
     return this->solve<true>(x);
@@ -249,13 +283,15 @@ private:
     std::vector<scalar_t> temp_expand(x.size());
     std::vector<scalar_t> temp_contract(x.size());
     
-    scalar_t ref_score = 0, exp_score = 0, cont_score = 0;
+    scalar_t ref_score = 0, exp_score = 0, cont_score = 0, fun_std_err= 0;
     // simplex iteration 
     while(true) {
       // find best, worst and second worst scores
       best = 0;
       worst = 0;
-      second_worst = 0;
+      second_worst = 0; 
+      fun_std_err = std_err(scores);
+      
       for( size_t i = 1; i < scores.size(); i++ ) {
         // if function value is lower than the current smallest, 
         // this is the new best point
@@ -279,8 +315,9 @@ private:
       }
       // check whether we should stop - either by exceeding iterations or by 
       // reaching tolerance 
-      if( iter >= this->max_iter || (std_err(scores) < this->eps) ||
-          no_change_iter >= this->no_change_best_tol) {
+      if( iter >= this->max_iter ||
+          fun_std_err < this->eps ||
+          no_change_iter >= this->no_change_best_tol ) {
         x = current_simplex.vals[best];
         return solver_status<scalar_t>(scores[best], iter, function_calls_used); 
       }
@@ -565,19 +602,19 @@ public:
                                     const std::vector<scalar_t> &lower,
                                     const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
-    return this->solve(x, true);
+    return this->solve<true>(x);
   }
   // maximize helper 
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x,
                                     const std::vector<scalar_t> &lower,
                                     const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
-    return this->solve(x, false);
+    return this->solve<false>(x);
   }
 private:
-  solver_status<scalar_t> solve( std::vector<scalar_t> & x, const bool minimize = true) {
+  template <const bool minimize = true> solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
     size_t iter = 0;
-    this->update_best_positions(minimize);
+    this->update_best_positions<minimize>();
     while(true) {
       // if particles have stabilized (no improvement in objective iteration or 
       // no heterogeneity of particles) or we are over the limit, return
@@ -591,7 +628,7 @@ private:
       this->update_velocities();
       this->threshold_velocities();
       this->update_positions();
-      this->update_best_positions(minimize);
+      this->update_best_positions<minimize>();
       // increment iteration counter
       iter++;
     }
@@ -661,10 +698,10 @@ private:
       }
     }
   }
-  void update_best_positions(const bool minimize = true) {
+  template <const bool minimize = true> void update_best_positions() {
     scalar_t temp = 0;
     size_t best_index = 0;
-    scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     
     for( size_t i = 0; i < this->n_particles; i++) {
       temp = f_multiplier * f(particle_positions[i]);
