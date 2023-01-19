@@ -379,8 +379,22 @@ project, include and happily use:</p>
 <ul>
 <li>Nelder-Mead</li>
 <li>Differential Evolution</li>
+<li>Particle Swarm Optimization (vanilla)</li>
+<li>Particle Swarm Optimization (Accelerated) <em>[planned]</em></li>
 <li>CVA-ES <em>[Work in progress]</em></li>
-<li>Particle Swarm Optimization <em>[planned]</em></li>
+</ul>
+</div>
+<div id="roadmap" class="section level1">
+<h1>Roadmap</h1>
+<p>The goal going forward would be to implement two kinds of constructs
+for constrained optimization (even though the algorithms implemented
+here might not be premium solvers for such cases):</p>
+<ul>
+<li>Fixed constraints (upper and lower bounds on acceptable parameter
+values)</li>
+<li>Inequality constraints (e.g. <span class="math inline">\(\phi_1 +
+\phi_2 &lt; 3\)</span>) - this will almost surely be implemented as a
+functor</li>
 </ul>
 </div>
 <div id="example-usage" class="section level1">
@@ -388,7 +402,6 @@ project, include and happily use:</p>
 <p>Solving the Rosenbrock function</p>
 <pre class="cpp"><code>#include &quot;nlsolver.h&quot;
 
-using nlsolver::NelderMeadSolver;
 using nlsolver::DESolver;
 // random number generators
 using nlsolver::rng::xorshift;
@@ -402,31 +415,31 @@ public:
   }
 };
 
+// Different Evolution (DE) solver example
 int main() {
   Rosenbrock rosenbrock_prob;
-  // Nelder Mead solver
-  auto problem = NelderMeadSolver&lt;Rosenbrock&gt;(rosenbrock_prob);
-
-  std::vector&lt;double&gt; init = {0,0};
-  // minimize interface - return solver status
-  auto res = problem.minimize(init);
+  // DE requires a random number generator - we include some, including a xorshift RNG:
+  xorshift&lt;double&gt; gen;
+  // initialize solver, supplying objective function and random number generator
+  auto de_solver = DESolver&lt;Rosenbrock, xorshift&lt;double&gt;, double&gt; (prob, gen);
+  
+  // prepare initial values - for DE these work to center the generated agents
+  std::vector&lt;double&gt; de_init = {5,7};;
+  auto de_res = de_solver.minimize(de_init);
   // print solver status
-  res.print();
-  // print values of result 
-  for( auto &amp;val:init) {
-    std::cout &lt;&lt; val &lt;&lt; &quot;,&quot; &lt;&lt; std::endl;
-  }
+  de_res.print();
+  // best parameters get written back to init
+  std::cout &lt;&lt; de_init[0] &lt;&lt; &quot;,&quot; &lt;&lt; std::cout &lt;&lt; de_init[1] &lt;&lt; std::endl;
 
   return 0;
 }</code></pre>
 </div>
 <div id="design-notes" class="section level1">
 <h1>Design notes</h1>
-<p>There are some design decisions in this library taken to achieve the
-main goals (i.e. simplicity, flexibility, ease of use, no
-dependencies):</p>
+<p>There are some design decisions in this library which warrant
+discussion:</p>
 <ul>
-<li>the objective functions to minimize/ maximize are passed as
+<li>the objective functions to minimize/ maximize are always passed as
 functors, requiring an overloaded <strong>public</strong>
 <strong>()</strong> operator which takes a
 <strong>std::vector<T></strong>, e.g. </li>
@@ -437,20 +450,33 @@ functors, requiring an overloaded <strong>public</strong>
   }
 };</code></pre>
 <ul>
-<li>there are no virtual calls in this library - much additional
-functionality is achieved entirely via templates, and the interfaces are
-made to be as similar as possible</li>
+<li>there are no virtual calls in this library - thus incurring no
+performance penalty</li>
+<li>each function exposes both a minimization and a maximization
+interface, and maximization is always implemented as ‘negative
+minimization’, i.e. by multiply the objective function by -1</li>
+<li>all optimizers come with default arguments that try to be sane and
+user friendly - but expert users are highly encouraged to supply their
+own values</li>
+<li>currently no multi-threading is supported - this is by design as
+functors are <em>potentially</em> stateful objective functions and
+multi-threading would require ensuring no data races happen due to this
+stateful nature.</li>
 </ul>
 <p>Additionally, this library also includes a set of (pseudo)-random and
 (quasi)-random number generators that also aim to get out of the way as
-much as possible.</p>
+much as possible, all of which are also implemented as functors. The
+library thus assumes that functors are used for random number generation
+- we demonstrate how to use standard library random number generators if
+one chooses to do so.</p>
 </div>
 <div id="contributing" class="section level1">
 <h1>Contributing</h1>
 <p>Feel free to open an issue or create a PR if you feel that an
 important piece of functionality is missing! Just keep civil, and try to
 keep within the spirit of the library (no dependencies, no virtual
-calls, )</p>
+calls, all minimizers take functors as objective functions, and
+objective functions are impure).</p>
 </div>
 
 

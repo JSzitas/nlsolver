@@ -16,6 +16,16 @@ no additional magic. Just copy the header into your project, include and happily
 * Particle Swarm Optimization (Accelerated) *[planned]*
 * CVA-ES *[Work in progress]*
 
+# Roadmap 
+
+The goal going forward would be to implement two kinds of constructs for constrained 
+optimization (even though the algorithms implemented here might not be premium solvers 
+for such cases): 
+
+* Fixed constraints (upper and lower bounds on acceptable parameter values)
+* Inequality constraints (e.g. $\phi_1 + \phi_2 < 3$) - this will almost surely be implemented
+as a functor
+
 # Example usage: 
 
 Solving the Rosenbrock function 
