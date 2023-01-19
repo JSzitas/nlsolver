@@ -2,7 +2,9 @@
 
 using nlsolver::NelderMeadSolver;
 using nlsolver::DESolver;
+using nlsolver::PSOSolver;
 using nlsolver::rng::xorshift;
+using nlsolver::rng::xoshiro;
 
 class Rosenbrock {
 public:
@@ -78,6 +80,23 @@ int main() {
   de_res = de_solver_MT.minimize(de_init);
   de_res.print();
   print_vector(de_init);
+  
+  std::cout << "Particle Swarm Optimization with xoroshift" << std::endl;
+  // using standard library random number generators
+  xoshiro<double> xos_gen;
+  std::vector<double> lower = {-5, -5};
+  std::vector<double> upper = {5, 5};
+  
+  // again initialize solver, this time also with the RNG
+  auto pso_solver = PSOSolver<Rosenbrock,
+                              xoshiro<double>,
+                              double> (prob, xos_gen);
+  // reset initial state
+  std::vector<double> pso_init = {0,0};
+  auto pso_res = pso_solver.minimize(pso_init, lower, upper);
+  pso_res.print();
+  print_vector(pso_init);
+  
   return 0;
 }
 

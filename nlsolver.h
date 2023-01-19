@@ -385,7 +385,7 @@ private:
   scalar_t function_value;
 };
 
-template <class Callable, typename scalar_t = double> class NelderMeadSolver {
+template <typename Callable, typename scalar_t = double> class NelderMeadSolver {
 private:
   Callable f;
   const scalar_t step, alpha, gamma, rho, sigma;
@@ -425,7 +425,7 @@ private:
      * minimum of function **f**, and for maximization we are seeking minimum of 
      * **-f** - and the compiler should hopefully treat this fairly well  
      */
-    constexpr scalar_t f_multiplier = minimize ? 1 : -1;
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     // score simplex values
     for( size_t i = 0; i < current_simplex.size(); i++) {
       scores[i] = f_multiplier * f(current_simplex.vals[i]);
@@ -532,7 +532,7 @@ private:
   }
 };
 
-template <class RNG, typename scalar_t = double> static inline std::vector<scalar_t>
+template <typename RNG, typename scalar_t = double> static inline std::vector<scalar_t>
   generate_sequence(const std::vector<scalar_t> &offset,
                     RNG & generator) {
     const size_t samples = offset.size();
@@ -544,7 +544,7 @@ template <class RNG, typename scalar_t = double> static inline std::vector<scala
     return result;
   }
 
-template <class RNG, typename scalar_t = double> static inline
+template <typename RNG, typename scalar_t = double> static inline
   std::vector<std::vector<scalar_t>> init_agents( const std::vector<scalar_t> & init,
                                                   RNG &generator,
                                                   const size_t n_agents ) {
@@ -556,12 +556,12 @@ template <class RNG, typename scalar_t = double> static inline
     return agents;
   }
 //static inline
-template <class RNG> size_t generate_index(const size_t max, RNG & generator) {
+template <typename RNG> size_t generate_index(const size_t max, RNG & generator) {
   // a slightly evil typecast
   return (size_t)(generator() * max);
 }
 
-template <class RNG> static inline std::array<size_t,4> generate_indices( 
+template <typename RNG> static inline std::array<size_t,4> generate_indices( 
     const size_t fixed,
     const size_t max,
     RNG& generator ) {
@@ -588,7 +588,7 @@ template <class RNG> static inline std::array<size_t,4> generate_indices(
   }
 }
 
-template <class RNG, typename scalar_t = double> static inline void propose_new_agent( 
+template <typename RNG, typename scalar_t = double> static inline void propose_new_agent( 
   const std::array<size_t,4> &ids, 
   std::vector<scalar_t> & proposal,
   const std::vector<std::vector<scalar_t>> & agents,
@@ -611,7 +611,7 @@ template <class RNG, typename scalar_t = double> static inline void propose_new_
 
 enum Recombination { best=1, random=2 };
 
-template <class Callable, class RNG, typename scalar_t = double> class DESolver {
+template <typename Callable, typename RNG, typename scalar_t = double> class DESolver {
 private:
   Callable f;
   RNG generator;
@@ -647,14 +647,14 @@ public:
     return this->solve<false, best>(x);
   }
 private:
-  template <const bool minimize=true, Recombination recomb = best>
+  template <const bool minimize=true, Recombination recomb=best>
   solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
 
     std::vector<std::vector<scalar_t>> agents = init_agents(x,
                                                             this->generator,
                                                             this->pop_size);
     std::array<size_t,4> new_indices = {0,0,0,0};
-    constexpr scalar_t f_multiplier = minimize ? 1 : -1;
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     std::vector<scalar_t> proposal_temp(x.size());
     
     std::vector<scalar_t> scores(agents.size());
@@ -702,7 +702,7 @@ private:
         score = f_multiplier * f(proposal_temp);
         function_calls_used++;
         // if score is better than previous score, update agent
-        if(scores[i] > score) {
+        if(score < scores[i]) {
           for( size_t j = 0; j < proposal_temp.size(); j++ ) {
             agents[i][j] = proposal_temp[j];
           }
@@ -714,7 +714,162 @@ private:
   }
 };
 
-template <class Callable, class RNG, typename scalar_t = double> class CMAESSolver {
+template <typename Callable, typename RNG, typename scalar_t=double> class PSOSolver {
+private:
+  // user supplied
+  RNG generator;
+  Callable f;
+  scalar_t inertia, cognitive_coef, social_coef;
+  std::vector<scalar_t> lower, upper;
+  const scalar_t eps;
+  // static, derived from above 
+  size_t n_dim;
+  const size_t n_particles;
+  // internally created
+  std::vector<std::vector<scalar_t>> particle_positions;
+  std::vector<std::vector<scalar_t>> particle_velocities;
+  std::vector<std::vector<scalar_t>> particle_best_positions;
+  std::vector<scalar_t> particle_best_values;
+  std::vector<scalar_t> swarm_best_position;
+  scalar_t swarm_best_value;
+  // book-keeping
+  size_t f_evals;
+  const size_t max_iter;
+public:
+  PSOSolver<Callable, RNG, scalar_t>( Callable &f,
+                                      RNG & generator,
+                                      scalar_t inertia = 0.8,
+                                      scalar_t cognitive_coef = 1.8,
+                                      scalar_t social_coef = 1.8,
+                                      const size_t n_particles = 10,
+                                      const size_t max_iter = 5000,
+                                      const scalar_t eps = 10e-4) :
+  generator(generator), f(f), inertia(inertia), cognitive_coef(cognitive_coef),
+  social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), eps(eps) {
+    this->swarm_best_value = 0.0;
+    this->f_evals = 0;
+  }
+  // minimize interface
+  solver_status<scalar_t> minimize( std::vector<scalar_t> &x, 
+                                    const std::vector<scalar_t> &lower,
+                                    const std::vector<scalar_t> &upper) {
+    this->init_solver_state(lower, upper);
+    return this->solve(x, true);
+  }
+  // maximize helper 
+  solver_status<scalar_t> maximize( std::vector<scalar_t> &x,
+                                    const std::vector<scalar_t> &lower,
+                                    const std::vector<scalar_t> &upper) {
+    this->init_solver_state(lower, upper);
+    return this->solve(x, false);
+  }
+private:
+  solver_status<scalar_t> solve( std::vector<scalar_t> & x, const bool minimize = true) {
+    size_t iter = 0;
+    this->update_best_positions(minimize);
+    while(true) {
+      // if agents have stabilized, return
+      if( iter >= this->max_iter || std_err(this->particle_best_values) < this->eps ) {
+        x = this->swarm_best_position;
+        // best scores, iteration number and function calls used total
+        return solver_status<scalar_t>(this->swarm_best_value, iter, this->f_evals);
+      }
+      this->update_velocities();
+      this->threshold_velocities();
+      this->update_positions();
+      this->update_best_positions(minimize);
+      // increment iteration counter
+      iter++;
+    }
+  }
+  // for repeated initializations we will init solver with new bounds 
+  void init_solver_state( const std::vector<scalar_t> &lower,
+                          const std::vector<scalar_t> &upper) {
+    this->n_dim = lower.size();
+    this->upper = upper;
+    this->lower= lower;
+    
+    this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+    this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
+    this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+    
+    // create particles 
+    for( size_t i = 0; i < this->n_particles; i++ ) {
+      this->particle_positions[i] = std::vector<scalar_t>(this->n_dim);
+      this->particle_velocities[i] = std::vector<scalar_t>(this->n_dim);
+      this->particle_best_positions[i] = std::vector<scalar_t>(this->n_dim);
+    }
+    scalar_t temp = 0;
+    for( size_t i = 0; i < n_particles; i++ ) {
+      for( size_t j = 0; j < this->n_dim; j++ ) {
+        // update velocities and positions
+        temp = abs(upper[j] - lower[j]);
+        this->particle_positions[i][j] = lower[j] + ( (upper[j] - lower[j]) * generator());
+        this->particle_velocities[i][j] = -temp + (generator() * temp);
+        // update particle best positions 
+        this->particle_best_positions[i][j] = this->particle_positions[i][j];
+      }
+    }
+    this->particle_best_values = std::vector<scalar_t>(this->n_particles, 10000);
+  }
+  void update_velocities() {
+    scalar_t r_p = 0, r_g = 0, temp = 0;
+    for( size_t i=0; i < this->n_particles; i++ ) {
+      for( size_t j = 0; j < this->n_dim; j++ ) {
+        // generate random movements 
+        r_p = generator();
+        r_g = generator();
+        // update current velocity for current particle - inertia update
+        this->particle_velocities[i][j] = (this->inertia * this->particle_velocities[i][j]) +
+          // cognitive update (moving more if futher away from 'best' position of particle)
+          this->cognitive_coef * r_p * (particle_best_positions[i][j] - particle_positions[i][j]) + 
+          // social update (moving more if further away from 'best' position of swarm)
+          this->social_coef * r_g * (this->swarm_best_position[i] - particle_positions[i][j]);
+      }
+    }
+  }
+  void threshold_velocities() {
+    for( size_t i=0; i < this->n_particles; i++ ) {
+      for( size_t j = 0; j < this->n_dim; j++ ) {
+        // threshold velocities between lower and upper
+        this->particle_velocities[i][j] = this->particle_velocities[i][j] <
+          this->lower[j] ? this->lower[j] : this->particle_velocities[i][j];
+        this->particle_velocities[i][j] = this->particle_velocities[i][j] >
+          this->upper[j] ? this->upper[j] : this->particle_velocities[i][j];
+      }
+    }
+  }
+  void update_positions() {
+    for( size_t i= 0; i < this->n_particles; i++ ) {
+      for( size_t j = 0; j < this->n_dim; j++ ) {
+        // update positions using current velocity
+        this->particle_positions[i][j] += this->particle_velocities[i][j];  
+      }
+    }
+  }
+  void update_best_positions(const bool minimize = true) {
+    scalar_t temp = 0;
+    size_t best_index = 0;
+    scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    
+    for( size_t i = 0; i < this->n_particles; i++) {
+      temp = f_multiplier * f(particle_positions[i]);
+      this->f_evals++;
+      if( temp < this->swarm_best_value ) {
+        this->swarm_best_value = temp;
+        // save update of swarm best position for after the loop so we do not 
+        // by chance do many many copies here
+        best_index = i;
+      }
+      if( temp < this->particle_best_values[i] ) {
+        this->particle_best_values[i] = temp;
+      }
+    }
+    this->swarm_best_position = this->particle_positions[best_index];
+  }
+};
+
+template <typename Callable, typename RNG, typename scalar_t = double> class CMAESSolver {
 private:
   Callable f;
   const size_t pop_size;
