@@ -231,6 +231,12 @@ template <typename scalar_t = double> struct solver_status{
   std::tuple<size_t, size_t, scalar_t> get_summary() const {
     return std::make_tuple(this->function_calls_used, this->iteration, this->function_value);
   }
+  void add( const solver_status<scalar_t> &additional_runs  ) {
+    auto other = additional_runs.get_summary();
+    this->function_calls_used += std::get<0>(other);
+    this->iteration += std::get<1>(other);
+    this->function_value = std::get<2>(other);
+  }
 private:
   scalar_t function_value;
   size_t iteration, function_calls_used;
@@ -243,7 +249,7 @@ private:
   scalar_t eps;
   std::vector<scalar_t> point_values;
   size_t best_point, worst_point;
-  const size_t max_iter, no_change_best_tol;
+  const size_t max_iter, no_change_best_tol, restarts;
 public:
   // constructor
   NelderMeadSolver<Callable, scalar_t>( Callable &f,
@@ -254,17 +260,27 @@ public:
                                          const scalar_t sigma = 0.5,
                                          const scalar_t eps = 10e-4,
                                          const size_t max_iter = 500,
-                                         const size_t no_change_best_tol = 100) : f(f), step(step),
-                                         alpha(alpha), gamma(gamma), rho(rho),
-                                         sigma(sigma), eps(eps),
-                                         max_iter(max_iter), no_change_best_tol(no_change_best_tol) {}
+                                         const size_t no_change_best_tol = 100,
+                                         const size_t restarts = 3) : f(f),
+    step(step), alpha(alpha), gamma(gamma), rho(rho), sigma(sigma), eps(eps),
+    max_iter(max_iter), no_change_best_tol(no_change_best_tol),
+    restarts(restarts) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
-    return this->solve<true>(x);
+    
+    auto res = this->solve<true>(x);
+    for( size_t i = 0; i < this->restarts; i++ ) {
+      res.add(this->solve<true>(x));
+    }
+    return res;
   }
   // maximize interface
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
-    return this->solve<false>(x);
+    auto res = this->solve<false>(x);
+    for( size_t i = 0; i < this->restarts; i++ ) {
+      res.add(this->solve<false>(x));
+    }
+    return res;
   }
 private:
   template <const bool minimize = true> solver_status<scalar_t> 
