@@ -9,7 +9,7 @@ using nlsolver::rng::xoshiro;
 class Rosenbrock {
 public:
   double operator()(std::vector<double> &x) {
-    const double t1 = x[0];
+    const double t1 = 5 - x[0];
     const double t2 = (x[1] - x[0] * x[0]);
     return t1 * t1 + 100 * t2 * t2;
   }
@@ -65,7 +65,7 @@ int main() {
   // again initialize solver, this time also with the RNG
   auto de_solver = DESolver<Rosenbrock, xorshift<double>, double> (prob, gen);
 
-  std::vector<double> de_init = {5,7};;
+  std::vector<double> de_init = {2,7};;
   auto de_res = de_solver.minimize(de_init);
   de_res.print();
   print_vector(de_init);
@@ -76,7 +76,7 @@ int main() {
   // again initialize solver, this time also with the RNG
   auto de_solver_MT = DESolver<Rosenbrock, std_MT, double> (prob, std_gen);
   // reset initial state
-  de_init[0] = 5; de_init[1] = 7;
+  de_init[0] = 2; de_init[1] = 7;
   de_res = de_solver_MT.minimize(de_init);
   de_res.print();
   print_vector(de_init);
@@ -84,8 +84,8 @@ int main() {
   std::cout << "Particle Swarm Optimization with xoroshift" << std::endl;
   // using standard library random number generators
   xoshiro<double> xos_gen;
-  std::vector<double> lower = {-5, -5};
-  std::vector<double> upper = {5, 5};
+  std::vector<double> lower = {-3, -3};
+  std::vector<double> upper = {13, 13};
 
   // again initialize solver, this time also with the RNG
   auto pso_solver = PSOSolver<Rosenbrock,
