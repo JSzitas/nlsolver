@@ -66,6 +66,12 @@ int main() {
 }
 ```
 
+Or run all examples from the commmand line with **make**:
+```{bash}
+make example
+```
+
+
 # Design notes
 
 There are some design decisions in this library which warrant discussion: 
