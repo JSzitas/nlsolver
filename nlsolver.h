@@ -579,26 +579,54 @@ public:
   generator(generator), f(f), inertia(inertia), cognitive_coef(cognitive_coef),
   social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), 
   best_val_no_change(best_val_no_change), eps(eps) {
-    this->swarm_best_value = 100000.0;
-    this->f_evals = 0;
-    this-> val_no_change = 0;
+    
+    this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+    this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
+    this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+  }
+  // minimize interface
+  solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
+    std::vector<scalar_t> lower(x.size());
+    std::vector<scalar_t> upper(x.size());
+    scalar_t temp = 0;
+    for( size_t i = 0; i < x.size(); i++) {
+      temp = std::abs(x[i]);
+      lower[i] = -temp;
+      upper[i] = temp;
+    }
+    this->init_solver_state(lower, upper);
+    return this->solve<true, false>(x);
+  }
+  // maximize helper 
+  solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
+    std::vector<scalar_t> lower(x.size());
+    std::vector<scalar_t> upper(x.size());
+    scalar_t temp = 0;
+    for( size_t i = 0; i < x.size(); i++) {
+      temp = std::abs(x[i]);
+      lower[i] = -temp;
+      upper[i] = temp;
+    }
+    this->init_solver_state(lower, upper);
+    return this->solve<false, false>(x);
   }
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x, 
                                     const std::vector<scalar_t> &lower,
                                     const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
-    return this->solve<true>(x);
+    return this->solve<true, true>(x);
   }
   // maximize helper 
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x,
                                     const std::vector<scalar_t> &lower,
                                     const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
-    return this->solve<false>(x);
+    return this->solve<false, true>(x);
   }
 private:
-  template <const bool minimize = true> solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
+  template <const bool minimize = true, const bool constrained = true>
+  solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
     size_t iter = 0;
     this->update_best_positions<minimize>();
     while(true) {
@@ -612,7 +640,9 @@ private:
         return solver_status<scalar_t>(this->swarm_best_value, iter, this->f_evals);
       }
       this->update_velocities();
-      this->threshold_velocities();
+      if constexpr(constrained) {
+        this->threshold_velocities();
+      }
       this->update_positions();
       this->update_best_positions<minimize>();
       // increment iteration counter
@@ -626,9 +656,12 @@ private:
     this->upper = upper;
     this->lower= lower;
     
-    this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
-    this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
-    this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+    this->swarm_best_value = 100000.0;
+    this->f_evals = 0;
+    this-> val_no_change = 0;
+    // this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
+    // this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
+    // this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
     
     // create particles 
     for( size_t i = 0; i < this->n_particles; i++ ) {
