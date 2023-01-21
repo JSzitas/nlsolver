@@ -9,7 +9,7 @@ using nlsolver::rng::xoshiro;
 class Rosenbrock {
 public:
   double operator()(std::vector<double> &x) {
-    const double t1 = 5 - x[0];
+    const double t1 = 1 - x[0];
     const double t2 = (x[1] - x[0] * x[0]);
     return t1 * t1 + 100 * t2 * t2;
   }
@@ -51,7 +51,7 @@ int main() {
   // initialize solver - passing the functor
   auto nm_solver = NelderMeadSolver<Rosenbrock>(prob);
   // initialize function arguments
-  std::vector<double> nm_init = {5,7};
+  std::vector<double> nm_init = {2,7};
   auto nm_res = nm_solver.minimize(nm_init);
   // check solver status 
   nm_res.print();
@@ -82,18 +82,26 @@ int main() {
   print_vector(de_init);
 
   std::cout << "Particle Swarm Optimization with xoroshift" << std::endl;
-  // using standard library random number generators
+  // we also have a xoshiro generator
   xoshiro<double> xos_gen;
-  std::vector<double> lower = {-3, -3};
-  std::vector<double> upper = {13, 13};
-
   // again initialize solver, this time also with the RNG
   auto pso_solver = PSOSolver<Rosenbrock,
                               xoshiro<double>,
                               double> (prob, xos_gen);
-  // reset initial state
-  std::vector<double> pso_init = {0,0};
-  auto pso_res = pso_solver.minimize(pso_init, lower, upper);
+  // set initial state - if no bounds are given, default initial parameters are 
+  // taken roughly as the scale of the parameter space
+  std::vector<double> pso_init = {2,2};
+  auto pso_res = pso_solver.minimize(pso_init);
+  pso_res.print();
+  print_vector(pso_init);
+  // this tends to be much worse than not specifying bounds for PSO - so 
+  // we heavily recommend those: 
+  pso_init[0] = 0;
+  pso_init[1] = 0;
+  std::vector<double> pso_lower = {-1,-1};
+  std::vector<double> pso_upper = {2,2};
+  
+  pso_res = pso_solver.minimize(pso_init, pso_lower, pso_upper);
   pso_res.print();
   print_vector(pso_init);
   
