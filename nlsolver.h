@@ -616,7 +616,7 @@ public:
                                       scalar_t social_coef = 1.8,
                                       const size_t n_particles = 10,
                                       const size_t max_iter = 5000,
-                                      const size_t best_val_no_change = 30,
+                                      const size_t best_val_no_change = 50,
                                       const scalar_t eps = 10e-4) :
   generator(generator), f(f), inertia(inertia), cognitive_coef(cognitive_coef),
   social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), 
@@ -682,10 +682,13 @@ private:
         return solver_status<scalar_t>(this->swarm_best_value, iter, this->f_evals);
       }
       this->update_velocities();
-      if constexpr(constrained) {
-        this->threshold_velocities();
-      }
+      // if constexpr(constrained) {
+      //   this->threshold_velocities();
+      // }
       this->update_positions();
+      if constexpr(constrained) {
+        this->threshold_positions();
+      }
       this->update_best_positions<minimize>();
       // increment iteration counter
       iter++;
@@ -756,6 +759,17 @@ private:
       for( size_t j = 0; j < this->n_dim; j++ ) {
         // update positions using current velocity
         this->particle_positions[i][j] += this->particle_velocities[i][j];  
+      }
+    }
+  }
+  void threshold_positions() {
+    for( size_t i=0; i < this->n_particles; i++ ) {
+      for( size_t j = 0; j < this->n_dim; j++ ) {
+        // threshold velocities between lower and upper
+        this->particle_positions[i][j] = this->particle_positions[i][j] <
+          this->lower[j] ? this->lower[j] : this->particle_positions[i][j];
+        this->particle_positions[i][j] = this->particle_positions[i][j] >
+          this->upper[j] ? this->upper[j] : this->particle_positions[i][j];
       }
     }
   }

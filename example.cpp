@@ -90,7 +90,7 @@ int main() {
                               double> (prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are 
   // taken roughly as the scale of the parameter space
-  std::vector<double> pso_init = {2,2};
+  std::vector<double> pso_init = {3,3};
   auto pso_res = pso_solver.minimize(pso_init);
   pso_res.print();
   print_vector(pso_init);
@@ -99,7 +99,7 @@ int main() {
   pso_init[0] = 0;
   pso_init[1] = 0;
   std::vector<double> pso_lower = {-1,-1};
-  std::vector<double> pso_upper = {2,2};
+  std::vector<double> pso_upper = {1,1};
   
   pso_res = pso_solver.minimize(pso_init, pso_lower, pso_upper);
   pso_res.print();
