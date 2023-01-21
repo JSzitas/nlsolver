@@ -11,11 +11,17 @@
 
 namespace nlsolver{
 
+// template <typename scalar_t = double> static inline scalar_t abs_(scalar_t a) {
+//   return a < 0 ? -a : a;
+// }
+
 template <typename scalar_t = double> static inline scalar_t max_abs_vec(const std::vector<scalar_t>& x) {
-  auto result = abs(x[0]);
+  auto result = std::abs(x[0]);
+  scalar_t temp = 0;
   for(size_t i =1; i < x.size(); i++) {
-    if(result < abs(x[i])) {
-      result = abs(x[i]);
+    temp = std::abs(x[i]);
+    if(result < temp) {
+      result = temp;
     }
   }
   return result;
@@ -101,30 +107,6 @@ template <typename scalar_t = double> struct simplex {
   std::vector<std::vector<scalar_t>> vals;
 };
 
-template <typename scalar_t = double> static inline void operator +=(
-  std::vector<scalar_t> & a,
-  std::vector<scalar_t> & b) {
-  for(size_t i = 0; i < a.size(); i++) {
-    a[i] += b[i];
-  } 
-}
-
-template <typename scalar_t = double> static inline void operator +=(
-  std::vector<scalar_t> a,
-  const std::vector<scalar_t> b) {
-  for(size_t i = 0; i < a.size(); i++) {
-    a[i] += b[i];
-  } 
-}
-
-template <typename scalar_t = double> static inline void operator /=(
-  std::vector<scalar_t> & a,
-  scalar_t b) {
-  for(size_t i = 0; i < a.size(); i++) {
-    a[i] /= b;
-  } 
-}
-
 template <typename scalar_t = double> static inline std::vector<scalar_t> get_centroid(
   const simplex<scalar_t> &x,
   const size_t except ) {
@@ -132,11 +114,15 @@ template <typename scalar_t = double> static inline std::vector<scalar_t> get_ce
   std::vector<scalar_t> dim_means(x.size());
   size_t i = 0;
   for(; i < except; i++ ) {
-    dim_means += x.vals[i];
+    for(size_t j = 0; j < dim_means.size(); j++) {
+      dim_means[j] += x.vals[i][j];
+    }
   }
   i = except+1;
   for(; i < x.size(); i++ ) {
-    dim_means += x.vals[i];
+    for(size_t j = 0; j < dim_means.size(); j++) {
+      dim_means[j] += x.vals[i][j];
+    }
   }
   for( auto &val:dim_means ) {
     val /= (scalar_t)i;
@@ -220,13 +206,13 @@ template <typename scalar_t = double> struct solver_status{
     return std::make_tuple(this->function_calls_used, this->iteration, this->function_value);
   }
 private:
-  size_t iteration, function_calls_used;
   scalar_t function_value;
+  size_t iteration, function_calls_used;
 };
 
 template <typename Callable, typename scalar_t = double> class NelderMeadSolver {
 private:
-  Callable f;
+  Callable &f;
   const scalar_t step, alpha, gamma, rho, sigma;
   scalar_t eps;
   std::vector<scalar_t> point_values;
@@ -240,12 +226,12 @@ public:
                                          const scalar_t gamma = 2,
                                          const scalar_t rho = 0.5,
                                          const scalar_t sigma = 0.5,
-                                         const size_t max_iter = 500,
                                          const scalar_t eps = 10e-4,
+                                         const size_t max_iter = 500,
                                          const size_t no_change_best_tol = 100) : f(f), step(step),
                                          alpha(alpha), gamma(gamma), rho(rho),
-                                         sigma(sigma), max_iter(max_iter), 
-                                         eps(eps), no_change_best_tol(no_change_best_tol) {}
+                                         sigma(sigma), eps(eps),
+                                         max_iter(max_iter), no_change_best_tol(no_change_best_tol) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
     return this->solve<true>(x);
@@ -455,8 +441,8 @@ enum Recombination { best=1, random=2 };
 
 template <typename Callable, typename RNG, typename scalar_t = double> class DESolver {
 private:
-  Callable f;
-  RNG generator;
+  Callable &f;
+  RNG &generator;
   const scalar_t crossover_prob, differential_weight, eps; 
   const size_t pop_size, max_iter, best_value_no_change;
   const Recombination recomb;
@@ -562,14 +548,12 @@ private:
 template <typename Callable, typename RNG, typename scalar_t=double> class PSOSolver {
 private:
   // user supplied
-  RNG generator;
-  Callable f;
+  RNG &generator;
+  Callable &f;
   scalar_t inertia, cognitive_coef, social_coef;
   std::vector<scalar_t> lower, upper;
-  const scalar_t eps;
   // static, derived from above 
   size_t n_dim;
-  const size_t n_particles, best_val_no_change;
   // internally created
   std::vector<std::vector<scalar_t>> particle_positions;
   std::vector<std::vector<scalar_t>> particle_velocities;
@@ -579,7 +563,9 @@ private:
   scalar_t swarm_best_value;
   // book-keeping
   size_t f_evals, val_no_change;
-  const size_t max_iter;
+  // static limits 
+  const size_t n_particles, max_iter, best_val_no_change;
+  const scalar_t eps;
 public:
   PSOSolver<Callable, RNG, scalar_t>( Callable &f,
                                       RNG & generator,
@@ -654,7 +640,7 @@ private:
     for( size_t i = 0; i < n_particles; i++ ) {
       for( size_t j = 0; j < this->n_dim; j++ ) {
         // update velocities and positions
-        temp = abs(upper[j] - lower[j]);
+        temp = std::abs(upper[j] - lower[j]);
         this->particle_positions[i][j] = lower[j] + ( (upper[j] - lower[j]) * generator());
         this->particle_velocities[i][j] = -temp + (generator() * temp);
         // update particle best positions 
@@ -664,7 +650,7 @@ private:
     this->particle_best_values = std::vector<scalar_t>(this->n_particles, 10000);
   }
   void update_velocities() {
-    scalar_t r_p = 0, r_g = 0, temp = 0;
+    scalar_t r_p = 0, r_g = 0;
     for( size_t i=0; i < this->n_particles; i++ ) {
       for( size_t j = 0; j < this->n_dim; j++ ) {
         // generate random movements 
@@ -725,12 +711,13 @@ private:
 
 template <typename Callable, typename RNG, typename scalar_t = double> class CMAESSolver {
 private:
-  Callable f;
+  Callable &f;
+  RNG &generator;
   const size_t pop_size;
   const scalar_t crossover_prob, differential_weight; 
 public:
   // constructor
-  CMAESSolver<Callable, RNG, scalar_t>( Callable &f){}
+  CMAESSolver<Callable, RNG, scalar_t>( Callable &f, RNG & generator){}
   // minimize interface
   void minimize( std::vector<scalar_t> &x) {
     this->solve<true>(x);
@@ -756,8 +743,8 @@ uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
 }
 
 template <typename scalar_t = float> struct halton {
-  halton<scalar_t>(){
-    b=2;
+  halton<scalar_t>(scalar_t base = 2){
+    b=base;
     y = 1;
     n=0;
     d=1;
@@ -781,13 +768,6 @@ template <typename scalar_t = float> struct halton {
   scalar_t operator ()() {
     return this->yield();
   }
-  void set( scalar_t base ) {
-    b = base;
-    y = 1;
-    n = 0;
-    d = 1;
-    x = 1;
-  };
   void reset(){
     b=2;
     y = 1;
@@ -795,6 +775,22 @@ template <typename scalar_t = float> struct halton {
     d = 1;
     x = 1;
   };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(5);
+    result[0] = b;
+    result[1] = y;
+    result[2] = n;
+    result[3] = d;
+    result[4] = x;
+    return result;
+  }
+  void set_state(scalar_t b, scalar_t y, scalar_t n, scalar_t d, scalar_t x) {
+    this->b = b;
+    this->y = y;
+    this->n = n; 
+    this->d = d;
+    this->x = x;
+  }
 private:
   scalar_t b, y, n, d, x;
 };
@@ -827,6 +823,16 @@ template <typename scalar_t = float> struct recurrent {
     seed = 0.5;
     z = 0;
   };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(2);
+    result[0] = alpha;
+    result[1] = z;
+    return result;
+  }
+  void set_state(scalar_t alpha = 0.618034, scalar_t z = 0) {
+    this->alpha = alpha;
+    this->z = z;
+  }
 private:
   scalar_t alpha = 0.618034, seed = 0.5, z = 0;
 };
@@ -850,9 +856,14 @@ template <typename scalar_t = float> struct splitmix {
     result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
     return result ^ (result >> 31);
   };
-  void set( uint64_t x ) {
-    s = x;
+  void set_state( uint64_t s ) {
+    this->s = s;
   };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(1);
+    result[0] = this->s;
+    return result;
+  }
 private:
   uint64_t s;
 };
@@ -891,15 +902,22 @@ template <typename scalar_t = float> struct xoshiro {
     s[2] = gn.yield();
     s[3] = s[2] >> 32;
   };
-  void set( uint64_t x,
-            uint64_t y,
-            uint64_t z,
-            uint64_t t) {
-    s[0] = x;
-    s[1] = y;
-    s[2] = z;
-    s[3] = t;
+  void set_state( uint64_t x,
+                  uint64_t y,
+                  uint64_t z,
+                  uint64_t t) {
+    this->s[0] = x;
+    this->s[1] = y;
+    this->s[2] = z;
+    this->s[3] = t;
   };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(4);
+    for(size_t i = 0; i < 4; i++) {
+      result[i] = this->s[i];
+    }
+    return result;
+  }
 private:
   uint64_t rol64(uint64_t x, int k)
   {
@@ -932,10 +950,17 @@ template <typename scalar_t = float> struct xorshift {
     x[0] = gn.yield_init();
     x[1] = x[0] >> 32;
   };
-  void set( uint64_t y, uint64_t z ) {
+  void set_state( uint64_t y, uint64_t z ) {
     x[0] = y;
     x[1] = z;
   };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(2);
+    for(size_t i = 0; i < 2; i++) {
+      result[i] = this->x[i];
+    }
+    return result;
+  }
 private:
   uint64_t x[2];
 };
