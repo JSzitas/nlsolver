@@ -31,15 +31,12 @@
 #include <array>
 #include <tuple>
 #include <unordered_set>
+#include <optional>
 
 #include <iostream>
 #include "cmath"
 
 namespace nlsolver{
-
-// template <typename scalar_t = double> static inline scalar_t abs_(scalar_t a) {
-//   return a < 0 ? -a : a;
-// }
 
 template <typename scalar_t = double> static inline scalar_t max_abs_vec(const std::vector<scalar_t>& x) {
   auto result = std::abs(x[0]);
@@ -129,6 +126,19 @@ template <typename scalar_t = double> struct simplex {
   const size_t size() const { return this->vals.size(); }
   void replace( std::vector<scalar_t> & new_val, const size_t at ) {
     this->vals[at] = new_val;
+  }
+  void replace( std::vector<scalar_t> & new_val, 
+                const size_t at,
+                const std::vector<scalar_t> & upper,
+                const std::vector<scalar_t> & lower,
+                const scalar_t inversion_eps = 0.00001) {
+    for( size_t i = 0; i < new_val.size(); i++ ) {
+      this->vals[at][i] = new_val[i] < lower[i] ?
+                            lower[i] + inversion_eps : 
+                              new_val[i] > upper[i] ?
+                                upper[i] - inversion_eps :
+                                  new_val[i];
+    }
   }
   std::vector<std::vector<scalar_t>> vals;
 };
@@ -250,6 +260,7 @@ private:
   std::vector<scalar_t> point_values;
   size_t best_point, worst_point;
   const size_t max_iter, no_change_best_tol, restarts;
+  std::optional<std::vector<scalar_t>> lower, upper;
 public:
   // constructor
   NelderMeadSolver<Callable, scalar_t>( Callable &f,
@@ -268,22 +279,47 @@ public:
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
     
-    auto res = this->solve<true>(x);
+    auto res = this->solve<true, false>(x);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<true>(x));
+      res.add(this->solve<true, false>(x));
+    }
+    return res;
+  }
+  // minimize with known bounds interface
+  solver_status<scalar_t> minimize( std::vector<scalar_t> &x,
+                                    const std::vector<scalar_t> &upper,
+                                    const std::vector<scalar_t> &lower) {
+    this->upper = upper;
+    this->lower = lower;
+    auto res = this->solve<true, true>(x);
+    for( size_t i = 0; i < this->restarts; i++ ) {
+      res.add(this->solve<true, true>(x));
     }
     return res;
   }
   // maximize interface
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
-    auto res = this->solve<false>(x);
+    auto res = this->solve<false, false>(x);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<false>(x));
+      res.add(this->solve<false, false>(x));
+    }
+    return res;
+  }
+  // maximize with known bounds interface
+  solver_status<scalar_t> maximize( std::vector<scalar_t> &x,
+                                    const std::vector<scalar_t> &upper,
+                                    const std::vector<scalar_t> &lower) {
+    this->upper = upper;
+    this->lower = lower;
+    auto res = this->solve<false, true>(x);
+    for( size_t i = 0; i < this->restarts; i++ ) {
+      res.add(this->solve<false, true>(x));
     }
     return res;
   }
 private:
-  template <const bool minimize = true> solver_status<scalar_t> 
+  template <const bool minimize = true,
+            const bool bound = false> solver_status<scalar_t> 
   solve( std::vector<scalar_t> & x) {
     // set up simplex
     simplex<scalar_t> current_simplex( x, this->step);
@@ -359,7 +395,12 @@ private:
       function_calls_used++;
       // if reflected point is better than second worst, but not better than the best 
       if( ref_score >= scores[best] && ref_score < scores[second_worst]) {
-        current_simplex.replace(temp_reflect, worst);
+        if constexpr(bound) {
+          current_simplex.replace(temp_reflect, worst, *this->upper, *this->lower);
+        }
+        if constexpr(!bound) {
+          current_simplex.replace(temp_reflect, worst);
+        }
         // otherwise if this is the best score so far, expand
       } else if( ref_score < scores[best] ) {
         transform(temp_reflect, centroid, temp_expand, this->gamma);
@@ -368,7 +409,19 @@ private:
         function_calls_used++;
         // if this is better than the expanded point score, replace the worst point 
         // with the expanded point, otherwise replace it with the reflected point 
-        current_simplex.replace( exp_score < ref_score ? temp_expand : temp_reflect , worst );
+        if constexpr(bound) {
+          current_simplex.replace(
+            exp_score < ref_score ? temp_expand : temp_reflect,
+                        worst,
+                        *this->upper,
+                        *this->lower);
+        }
+        if constexpr(!bound) {
+          current_simplex.replace(
+            exp_score < ref_score ? temp_expand : temp_reflect,
+                        worst);
+        }
+        
         scores[worst] = exp_score < ref_score ? exp_score : ref_score;
         // otherwise we have a point  worse than the 'second worst'
       } else {
@@ -382,10 +435,17 @@ private:
         // if this contraction is better than the reflected point or worst point, respectively
         if( cont_score < ( ref_score < scores[worst] ? ref_score : scores[worst]) ) {
           // replace worst point with contracted point 
-          current_simplex.replace(temp_contract, worst);
+          if constexpr(bound) {
+            current_simplex.replace( temp_contract, worst, *this->upper, *this->lower);
+          }
+          if constexpr(!bound) {
+            current_simplex.replace(temp_contract, worst);
+          }
           scores[worst] = cont_score;
           // otherwise shrink 
         } else {
+          // if we had not violated the bounds before shrinking, shrinking 
+          // will not cause new violations - hence no bounds applied here
           shrink(current_simplex, best, this->sigma);
           // only in this case do we have to score again
           for( size_t i = 0; i < best; i++) {
