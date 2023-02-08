@@ -58,12 +58,16 @@ int main() {
   // and estimated function parameters
   print_vector(nm_init);
   
+  
+  // use recombination strategy
+  using DEStrat = nlsolver::RecombinationStrategy;
+  
   std::cout << "Differential evolution with xorshift" << std::endl;
   // differential evolution requires a random number generator - we
   // include some, including a xorshift RNG, and a xoshiro RNG
   xorshift<double> gen;
   // again initialize solver, this time also with the RNG
-  auto de_solver = DESolver<Rosenbrock, xorshift<double>, double> (prob, gen);
+  auto de_solver = DESolver<Rosenbrock, xorshift<double>, double, DEStrat::best> (prob, gen);
 
   std::vector<double> de_init = {2,7};;
   auto de_res = de_solver.minimize(de_init);
@@ -74,6 +78,7 @@ int main() {
   // using standard library random number generators
   std_MT std_gen;
   // again initialize solver, this time also with the RNG
+  // if strategy is not specifieed, defaults to random 
   auto de_solver_MT = DESolver<Rosenbrock, std_MT, double> (prob, std_gen);
   // reset initial state
   de_init[0] = 2; de_init[1] = 7;
@@ -81,9 +86,12 @@ int main() {
   de_res.print();
   print_vector(de_init);
 
-  std::cout << "Particle Swarm Optimization with xoroshift" << std::endl;
+  std::cout << "Particle Swarm Optimization with xoshiro" << std::endl;
   // we also have a xoshiro generator
   xoshiro<double> xos_gen;
+  
+  // add PSO Solver Type - defaults to random 
+  using nlsolver::PSOType;
   // again initialize solver, this time also with the RNG
   auto pso_solver = PSOSolver<Rosenbrock,
                               xoshiro<double>,
@@ -104,6 +112,19 @@ int main() {
   pso_res = pso_solver.minimize(pso_init, pso_lower, pso_upper);
   pso_res.print();
   print_vector(pso_init);
+  std::cout << "Accelerated Particle Swarm Optimization with xoshiro" << std::endl;
+  // we also have an accelerated version - we reset the RNG as well. 
+  xos_gen.reset();
+  auto apso_solver = PSOSolver<Rosenbrock,
+                              xoshiro<double>,
+                              double,
+                              PSOType::Accelerated> (prob, xos_gen);
+  // set initial state - if no bounds are given, default initial parameters are 
+  // taken roughly as the scale of the parameter space
+  std::vector<double> apso_init = {3,3};
+  auto apso_res = apso_solver.minimize(apso_init);
+  apso_res.print();
+  print_vector(apso_init);
   
   return 0;
 }
