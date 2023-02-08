@@ -1,8 +1,11 @@
 # A simple, (single) header only C++17 library of Nonlinear Numerical Optimizers
 
-The main goal of this library is to be as easy to use as possible. For this reason, 
+The main goal of this library is to be as easy to use as possible, while providing 
+good performance, and enough flexibility to be useful. For this reason, 
 the library has no third party dependencies, requires no complex includes, 
-no additional magic. Just copy the header into your project, include and happily use:
+no additional magic. 
+
+Just copy the header into your project, include and use:
 
 ```cpp
 #include "nlsolver.h"
@@ -11,9 +14,13 @@ no additional magic. Just copy the header into your project, include and happily
 # Solvers: 
 
 * Nelder-Mead 
-* Differential Evolution 
-* Particle Swarm Optimization (vanilla)
-* Particle Swarm Optimization (Accelerated) *[planned]*
+* Differential Evolution (see https://ieeexplore.ieee.org/document/5601760 for explanation of different strategies)
+  + Random Recombination
+  + Best Recombination 
+* Particle Swarm Optimization 
+  + Vanilla
+  + Accelerated
+  + Adaptive (planned)
 * CVA-ES *[Work in progress]*
 
 # Roadmap 
@@ -25,6 +32,8 @@ for such cases):
 * Fixed constraints (upper and lower bounds on acceptable parameter values)
 * Inequality constraints (e.g. $\phi_1 + \phi_2 < 3$) - this will almost surely be implemented
 as a functor
+* Even more solvers
+* Performance benchmarks
 
 # Example usage: 
 
@@ -88,17 +97,16 @@ struct example {
 
 * there are no virtual calls in this library - thus incurring no performance penalty
 * each function exposes both a minimization and a maximization interface, and maximization is 
-  always implemented as 'negative minimization', i.e. by multiply the objective function by -1
+  always implemented as 'negative minimization', i.e. by multiplying the objective function by -1
 * all optimizers come with default arguments that try to be sane and user friendly - but expert 
   users are highly encouraged to supply their own values
 * currently no multi-threading is supported - this is by design as functors are *potentially*
-  stateful objective functions and multi-threading would require ensuring no data races happen 
-  due to this stateful nature. 
+  stateful objective functions and multi-threading would require ensuring no data races happen. 
   
 Additionally, this library also includes a set of (pseudo)-random and (quasi)-random number generators
 that also aim to get out of the way as much as possible, all of which are also implemented as functors. 
-The library thus assumes that functors are used for random number generation - we demonstrate how to use 
-standard library random number generators if one chooses to do so. 
+The library thus assumes that functors are used for random number generation - there is an example on 
+how to use standard library random number generators if one chooses to do so. 
   
 # Contributing
 

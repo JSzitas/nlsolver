@@ -368,19 +368,29 @@ pre code {
 <div id="a-simple-single-header-only-c17-library-of-nonlinear-numerical-optimizers" class="section level1">
 <h1>A simple, (single) header only C++17 library of Nonlinear Numerical
 Optimizers</h1>
-<p>The main goal of this library is to be as easy to use as possible.
+<p>The main goal of this library is to be as easy to use as possible,
+while providing good performance, and enough flexibility to be useful.
 For this reason, the library has no third party dependencies, requires
-no complex includes, no additional magic. Just copy the header into your
-project, include and happily use:</p>
+no complex includes, no additional magic.</p>
+<p>Just copy the header into your project, include and use:</p>
 <pre class="cpp"><code>#include &quot;nlsolver.h&quot;</code></pre>
 </div>
 <div id="solvers" class="section level1">
 <h1>Solvers:</h1>
 <ul>
 <li>Nelder-Mead</li>
-<li>Differential Evolution</li>
-<li>Particle Swarm Optimization (vanilla)</li>
-<li>Particle Swarm Optimization (Accelerated) <em>[planned]</em></li>
+<li>Differential Evolution (see <a href="https://ieeexplore.ieee.org/document/5601760" class="uri">https://ieeexplore.ieee.org/document/5601760</a> for
+explanation of different strategies)
+<ul>
+<li>Random Recombination</li>
+<li>Best Recombination</li>
+</ul></li>
+<li>Particle Swarm Optimization
+<ul>
+<li>Vanilla</li>
+<li>Accelerated</li>
+<li>Adaptive (planned)</li>
+</ul></li>
 <li>CVA-ES <em>[Work in progress]</em></li>
 </ul>
 </div>
@@ -395,6 +405,8 @@ values)</li>
 <li>Inequality constraints (e.g. <span class="math inline">\(\phi_1 +
 \phi_2 &lt; 3\)</span>) - this will almost surely be implemented as a
 functor</li>
+<li>Even more solvers</li>
+<li>Performance benchmarks</li>
 </ul>
 </div>
 <div id="example-usage" class="section level1">
