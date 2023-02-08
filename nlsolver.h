@@ -539,18 +539,19 @@ template <typename RNG, typename scalar_t = double> static inline void propose_n
   }
 }
 
-enum Recombination { best=1, random=2 };
+enum RecombinationStrategy { best, random };
 
-template <typename Callable, typename RNG, typename scalar_t = double> class DESolver {
+template <typename Callable, typename RNG,
+          typename scalar_t = double,
+          RecombinationStrategy RecombinationType=random> class DESolver {
 private:
   Callable &f;
   RNG &generator;
   const scalar_t crossover_prob, differential_weight, eps; 
   const size_t pop_size, max_iter, best_value_no_change;
-  const Recombination recomb;
 public:
   // constructor
-  DESolver<Callable, RNG, scalar_t>( 
+  DESolver<Callable, RNG, scalar_t, RecombinationType>( 
       Callable &f,
       RNG &generator,
       const scalar_t crossover_prob = 0.9,
@@ -558,27 +559,20 @@ public:
       const scalar_t eps = 10e-4,
       const size_t pop_size = 100,
       const size_t max_iter = 10000,
-      const size_t best_val_no_change = 50,
-      Recombination recomb = best) : 
+      const size_t best_val_no_change = 50) : 
   f(f), generator(generator), crossover_prob(crossover_prob),
   differential_weight(differential_weight), eps(eps), pop_size(pop_size),
-  max_iter(max_iter), best_value_no_change(best_val_no_change), recomb(recomb) {}
+  max_iter(max_iter), best_value_no_change(best_val_no_change) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
-    if(this->recomb == random) {
-      return this->solve<true, random>(x);
-    }
-    return this->solve<true, best>(x);
+      return this->solve<true>(x);
   }
   // maximize interface
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
-    if(this->recomb == random) {
-      return this->solve<false, random>(x);
-    }
-    return this->solve<false, best>(x);
+    return this->solve<false>(x);
   }
 private:
-  template <const bool minimize=true, Recombination recomb=best>
+  template <const bool minimize=true>
   solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
 
     std::vector<std::vector<scalar_t>> agents = init_agents(x,
@@ -619,10 +613,10 @@ private:
       // main loop - this can in principle be parallelized
       for( size_t i = 0; i < agents.size(); i++) {
         // generate agent indices - either using the best or the current agent
-        if constexpr(recomb == random) {
+        if constexpr( RecombinationType == random) {
           new_indices = generate_indices( i, agents.size(), this->generator);
         }
-        if constexpr(recomb == best) {
+        if constexpr( RecombinationType == best) {
           new_indices = generate_indices( best_id, agents.size(), this->generator);
         }
         // create new mutate proposal
@@ -638,7 +632,6 @@ private:
             agents[i][j] = proposal_temp[j];
           }
           scores[i] = score;
-          // std::cout << "agent updated: " << i << " new score: "<< score << std::endl;
         }
       }
       // increment iteration counter
@@ -647,12 +640,27 @@ private:
   }
 };
 
-template <typename Callable, typename RNG, typename scalar_t=double> class PSOSolver {
+template <typename scalar_t, typename RNG >static inline scalar_t rnorm(
+    RNG & generator) {
+  // this is not a particularly good generator, but it is 'good enough' for 
+  // our purposes. 
+  constexpr scalar_t pi_ = 3.141593; 
+  return sqrt(-2*log(generator()))*cos(2*pi_*generator());
+}
+
+enum PSOType{
+  Vanilla,
+  Accelerated
+};
+
+template <typename Callable, typename RNG,
+          typename scalar_t=double,
+          PSOType Type=Vanilla> class PSOSolver {
 private:
   // user supplied
   RNG &generator;
   Callable &f;
-  scalar_t inertia, cognitive_coef, social_coef;
+  scalar_t init_inertia, inertia, cognitive_coef, social_coef;
   std::vector<scalar_t> lower, upper;
   // static, derived from above 
   size_t n_dim;
@@ -669,7 +677,7 @@ private:
   const size_t n_particles, max_iter, best_val_no_change;
   const scalar_t eps;
 public:
-  PSOSolver<Callable, RNG, scalar_t>( Callable &f,
+  PSOSolver<Callable, RNG, scalar_t, Type>( Callable &f,
                                       RNG & generator,
                                       scalar_t inertia = 0.8,
                                       scalar_t cognitive_coef = 1.8,
@@ -681,9 +689,14 @@ public:
   generator(generator), f(f), inertia(inertia), cognitive_coef(cognitive_coef),
   social_coef(social_coef), n_particles(n_particles), max_iter(max_iter), 
   best_val_no_change(best_val_no_change), eps(eps) {
-    
     this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
-    this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
+    if constexpr(Type == Vanilla) {
+      this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
+    }  
+    if constexpr(Type == Accelerated) {
+      // keep track of original inertia 
+      this->init_inertia = inertia;
+    }
     this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
   }
   // minimize interface
@@ -741,10 +754,15 @@ private:
         // best scores, iteration number and function calls used total
         return solver_status<scalar_t>(this->swarm_best_value, iter, this->f_evals);
       }
-      this->update_velocities();
-      // if constexpr(constrained) {
-      //   this->threshold_velocities();
-      // }
+      if constexpr(Type == Vanilla) {
+        // Vanilla velocity update
+        this->update_velocities();
+      } 
+      if constexpr(Type == Accelerated) {
+        // update inertia - we might want to create a nicer way to do this 
+        // updating schedule... maybe a functor for it too? 
+        this->inertia = pow(this->init_inertia, iter);
+      }
       this->update_positions();
       if constexpr(constrained) {
         this->threshold_positions();
@@ -764,14 +782,12 @@ private:
     this->swarm_best_value = 100000.0;
     this->f_evals = 0;
     this-> val_no_change = 0;
-    // this->particle_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
-    // this->particle_velocities = std::vector<std::vector<scalar_t>>(this->n_particles);
-    // this->particle_best_positions = std::vector<std::vector<scalar_t>>(this->n_particles);
-    
     // create particles 
     for( size_t i = 0; i < this->n_particles; i++ ) {
       this->particle_positions[i] = std::vector<scalar_t>(this->n_dim);
-      this->particle_velocities[i] = std::vector<scalar_t>(this->n_dim);
+      if constexpr(Type == Vanilla) {
+        this->particle_velocities[i] = std::vector<scalar_t>(this->n_dim);
+      }  
       this->particle_best_positions[i] = std::vector<scalar_t>(this->n_dim);
     }
     scalar_t temp = 0;
@@ -780,7 +796,9 @@ private:
         // update velocities and positions
         temp = std::abs(upper[j] - lower[j]);
         this->particle_positions[i][j] = lower[j] + ( (upper[j] - lower[j]) * generator());
-        this->particle_velocities[i][j] = -temp + (generator() * temp);
+        if constexpr(Type == Vanilla) {
+          this->particle_velocities[i][j] = -temp + (generator() * temp);
+        }  
         // update particle best positions 
         this->particle_best_positions[i][j] = this->particle_positions[i][j];
       }
@@ -815,10 +833,25 @@ private:
     }
   }
   void update_positions() {
-    for( size_t i= 0; i < this->n_particles; i++ ) {
-      for( size_t j = 0; j < this->n_dim; j++ ) {
-        // update positions using current velocity
-        this->particle_positions[i][j] += this->particle_velocities[i][j];  
+    if constexpr(Type == Vanilla) {
+      for( size_t i= 0; i < this->n_particles; i++ ) {
+        for( size_t j = 0; j < this->n_dim; j++ ) {
+          // update positions using current velocity
+          this->particle_positions[i][j] += this->particle_velocities[i][j];
+        }
+      }
+    }
+    if constexpr(Type == Accelerated) {
+      for( size_t i= 0; i < this->n_particles; i++ ) {
+        for( size_t j = 0; j < this->n_dim; j++ ) {
+          // no need to use velocity - all can be inlined here
+          this->particle_positions[i][j] = 
+            this->inertia * rnorm<scalar_t>(this->generator) + 
+            // discount position 
+            (1 - this->cognitive_coef) * this->particle_positions[i][j] +
+            // add best position 
+            this->social_coef * swarm_best_position[j];
+        }
       }
     }
   }
