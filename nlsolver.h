@@ -143,27 +143,26 @@ template <typename scalar_t = double> struct simplex {
   std::vector<std::vector<scalar_t>> vals;
 };
 
-template <typename scalar_t = double> static inline std::vector<scalar_t> get_centroid(
+template <typename scalar_t = double> static inline void update_centroid(
+  std::vector<scalar_t> &centroid,
   const simplex<scalar_t> &x,
   const size_t except ) {
-  
-  std::vector<scalar_t> dim_means(x.size());
+  // reset centroid - fill with 0
+  std::fill(centroid.begin(), centroid.end(), 0.0);
   size_t i = 0;
   for(; i < except; i++ ) {
-    for(size_t j = 0; j < dim_means.size(); j++) {
-      dim_means[j] += x.vals[i][j];
+    for(size_t j = 0; j < centroid.size(); j++) {
+      centroid[j] += x.vals[i][j];
     }
   }
   i = except+1;
   for(; i < x.size(); i++ ) {
-    for(size_t j = 0; j < dim_means.size(); j++) {
-      dim_means[j] += x.vals[i][j];
+    for(size_t j = 0; j < centroid.size(); j++) {
+      centroid[j] += x.vals[i][j];
     }
   }
-  for( auto &val:dim_means ) {
-    val /= (scalar_t)i;
-  }
-  return dim_means;
+  for(auto &val:centroid) val /= (scalar_t)i;
+  return;
 }
 
 template <typename scalar_t = double> static inline void reflect(
@@ -241,7 +240,7 @@ template <typename scalar_t = double> struct solver_status{
   std::tuple<size_t, size_t, scalar_t> get_summary() const {
     return std::make_tuple(this->function_calls_used, this->iteration, this->function_value);
   }
-  void add( const solver_status<scalar_t> &additional_runs  ) {
+  void add( const solver_status<scalar_t> &additional_runs ) {
     auto other = additional_runs.get_summary();
     this->function_calls_used += std::get<0>(other);
     this->iteration += std::get<1>(other);
@@ -278,7 +277,6 @@ public:
     restarts(restarts) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
-    
     auto res = this->solve<true, false>(x);
     for( size_t i = 0; i < this->restarts; i++ ) {
       res.add(this->solve<true, false>(x));
@@ -387,7 +385,9 @@ private:
       }
       iter++;
       // compute centroid of all points except for the worst one 
-      centroid = get_centroid(current_simplex, worst);
+      // centroid = get_centroid(current_simplex, worst);
+      // update centroid of all points except for the worst one 
+      update_centroid(centroid, current_simplex, worst);
       // reflect worst point 
       reflect(current_simplex.vals[worst], centroid, temp_reflect, this->alpha);
       // score reflected point
@@ -870,7 +870,7 @@ private:
     scalar_t temp = 0;
     size_t best_index = 0;
     constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
-    
+    bool update_happened = false;
     for( size_t i = 0; i < this->n_particles; i++) {
       temp = f_multiplier * f(particle_positions[i]);
       this->f_evals++;
@@ -879,12 +879,15 @@ private:
         // save update of swarm best position for after the loop so we do not 
         // by chance do many many copies here
         best_index = i;
+        update_happened = true;
       }
       if( temp < this->particle_best_values[i] ) {
         this->particle_best_values[i] = temp;
       }
     }
-    this->swarm_best_position = this->particle_positions[best_index];
+    if(update_happened) {
+      this->swarm_best_position = this->particle_positions[best_index];
+    }
     // either increment to indicate no change in best objective value, 
     // or reset to 0
     this->val_no_change = (best_index == 0) * (this->val_no_change+1);
@@ -1145,6 +1148,33 @@ template <typename scalar_t = float> struct xorshift {
   }
 private:
   uint64_t x[2];
+};
+
+template <typename scalar_t = float> struct lehmer {
+  lehmer<scalar_t>() {
+    splitmix<scalar_t> gn;
+    x = gn.yield_init() << 64;
+  };
+  scalar_t yield() {
+    this->x *= 0xda942042e4dd58b5;
+    return this->x >> 64;
+  };
+  scalar_t operator ()() {
+    return this->yield();
+  }
+  void reset(){
+    splitmix<scalar_t> gn;
+    x = gn.yield_init() << 64;
+  };
+  void set_state( uint64_t x ) {
+    this->x = x;
+  };
+  std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result = {x};
+    return result;
+  }
+private:
+  uint64_t x;
 };
 }
 
