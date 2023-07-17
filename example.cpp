@@ -3,6 +3,7 @@
 using nlsolver::NelderMeadSolver;
 using nlsolver::DESolver;
 using nlsolver::PSOSolver;
+using nlsolver::SANNSolver;
 using nlsolver::rng::xorshift;
 using nlsolver::rng::xoshiro;
 
@@ -57,12 +58,28 @@ int main() {
   nm_res.print();
   // and estimated function parameters
   print_vector(nm_init);
-  
+
+  std::cout << "Nelder-Mead using a lambda function: " << std::endl;
+  // try the same with a lambda function 
+  auto RosenbrockLambda = [](std::vector<double> &x){
+      const double t1 = 1 - x[0];
+      const double t2 = (x[1] - x[0] * x[0]);
+      return t1 * t1 + 100 * t2 * t2;
+  };
+  auto nm_solver_lambda = NelderMeadSolver(RosenbrockLambda);
+  // initialize function arguments
+  nm_init = {2,7};
+  // nm_init[0] = 2;
+  // nm_init[1] = 7;
+  auto nm_res_lambda = nm_solver_lambda.minimize(nm_init);
+  // check solver status 
+  nm_res_lambda.print();
+  // and estimated function parameters
+  print_vector(nm_init);
   
   // use recombination strategy
   using DEStrat = nlsolver::RecombinationStrategy;
-  
-  std::cout << "Differential evolution with xorshift" << std::endl;
+  std::cout << "Differential evolution with xorshift: " << std::endl;
   // differential evolution requires a random number generator - we
   // include some, including a xorshift RNG, and a xoshiro RNG
   xorshift<double> gen;
@@ -74,7 +91,7 @@ int main() {
   de_res.print();
   print_vector(de_init);
 
-  std::cout << "Differential evolution with std::mt19937" << std::endl;
+  std::cout << "Differential evolution with std::mt19937: " << std::endl;
   // using standard library random number generators
   std_MT std_gen;
   // again initialize solver, this time also with the RNG
@@ -86,7 +103,7 @@ int main() {
   de_res.print();
   print_vector(de_init);
 
-  std::cout << "Particle Swarm Optimization with xoshiro" << std::endl;
+  std::cout << "Particle Swarm Optimization with xoshiro: " << std::endl;
   // we also have a xoshiro generator
   xoshiro<double> xos_gen;
   
@@ -102,6 +119,7 @@ int main() {
   auto pso_res = pso_solver.minimize(pso_init);
   pso_res.print();
   print_vector(pso_init);
+  std::cout << "Particle Swarm Optimization with xoshiro (and bounds): " << std::endl;
   // this tends to be much worse than not specifying bounds for PSO - so 
   // we heavily recommend those: 
   pso_init[0] = 0;
@@ -112,7 +130,7 @@ int main() {
   pso_res = pso_solver.minimize(pso_init, pso_lower, pso_upper);
   pso_res.print();
   print_vector(pso_init);
-  std::cout << "Accelerated Particle Swarm Optimization with xoshiro" << std::endl;
+  std::cout << "Accelerated Particle Swarm Optimization with xoshiro: " << std::endl;
   // we also have an accelerated version - we reset the RNG as well. 
   xos_gen.reset();
   auto apso_solver = PSOSolver<Rosenbrock,
@@ -125,6 +143,19 @@ int main() {
   auto apso_res = apso_solver.minimize(apso_init);
   apso_res.print();
   print_vector(apso_init);
+  
+  std::cout << "Simulated Annealing with xoshiro: " << std::endl;
+  // we also have an accelerated version - we reset the RNG as well. 
+  xos_gen.reset();
+  auto sann_solver = SANNSolver<Rosenbrock,
+                                xoshiro<double>,
+                                double> (prob, xos_gen);
+  // set initial state - if no bounds are given, default initial parameters are 
+  // taken roughly as the scale of the parameter space
+  std::vector<double> sann_init = {3,3};
+  auto sann_res = sann_solver.minimize(sann_init);
+  sann_res.print();
+  print_vector(sann_init);
   
   return 0;
 }
