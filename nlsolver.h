@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
 #ifndef NLSOLVER
 #define NLSOLVER
 
@@ -34,7 +33,7 @@
 #include <optional>
 
 #include <iostream>
-#include "cmath"
+#include <cmath>
 
 namespace nlsolver{
 
@@ -894,6 +893,78 @@ private:
   }
 };
 
+template <typename Callable, typename RNG,
+          typename scalar_t=double> class SANNSolver {
+private:
+  // user supplied
+  RNG &generator;
+  Callable &f;
+  // book-keeping
+  size_t f_evals;
+  // static limits 
+  const size_t max_iter, temperature_iter;
+  const scalar_t temperature_max;
+  public:
+    SANNSolver<Callable, RNG, scalar_t>( Callable &f,
+                                         RNG & generator,
+                                         const size_t max_iter = 5000,
+                                         const size_t temperature_iter = 10,
+                                         const scalar_t temperature_max = 10.0) :
+            generator(generator), f(f), f_evals(0), max_iter(max_iter),
+            temperature_iter(temperature_iter), 
+            temperature_max(temperature_max) {}
+    // minimize interface
+    solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
+      return this->solve<true>(x);
+    }
+    // maximize helper 
+    solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
+      return this->solve<false>(x);
+    }
+private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve( std::vector<scalar_t> & x) {
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0,
+      e_minus_1 = 1.7182818; 
+    scalar_t best_val = f_multiplier * this->f(x), scale = 1.0/temperature_max;
+    this->f_evals++;
+    const size_t n_dim = x.size();
+    std::vector<scalar_t> p = x, ptry = x;
+    size_t iter = 0; 
+    while(true) {  
+      if( iter >= this->max_iter ) {
+        // best scores, iteration number and function calls used total
+        return solver_status<scalar_t>(best_val, iter, this->f_evals);
+      }
+      // temperature annealing schedule - cooling
+      const scalar_t t = temperature_max/std::log(static_cast<scalar_t>(iter) + e_minus_1);
+      for(size_t j = 1; j < this->temperature_iter; j++) {
+        const scalar_t current_scale = t * scale;
+        // use random normal variates - this should allow user specified values 
+        for (size_t i = 0; i < n_dim; i++) {
+          // generate new candidate function values 
+          ptry[i] = p[i] + current_scale * rnorm<scalar_t>(this->generator);
+        }
+        const scalar_t current_val = f_multiplier * f(ptry); 
+        this->f_evals ++;
+        const scalar_t difference = current_val - best_val;
+        if ((difference <= 0.0) || (this->generator() < exp(-difference/t))) {
+          for (size_t k = 0; k < n_dim; k++) p[k] = ptry[k];
+          if (current_val <= best_val)
+          {
+            for (size_t k = 0; k < n_dim; k++) x[k] = p[k];
+            best_val = current_val;
+          }
+        }
+      }
+      iter++;
+    }
+  }
+};
+};
+
+namespace nlsolver::experimental {
+// TODO: WIP
 template <typename Callable, typename RNG, typename scalar_t = double> class CMAESSolver {
 private:
   Callable &f;
@@ -916,7 +987,224 @@ private:
     
   }
 };
+// TODO: this is currently a WIP based on https://github.com/PatWie/CppNumericalSolvers 
+// the goal here is to simplify the original interface, and get rid of the Eigen dependency
+template <typename Callable, typename scalar_t = double> class BFGS {
+private:
+  Callable &f;
+  std::vector<scalar_t> inverse_hessian, search_direction, gradient;
+public:
+  // constructor
+  BFGS<Callable, scalar_t>( Callable &f){}
+  // minimize interface
+  void minimize( std::vector<scalar_t> &x) {
+    this->solve<true>(x);
+  }
+  // maximize helper 
+  void maximize( std::vector<scalar_t> &x) {
+    this->solve<false>(x);
+  }
+private:
+  template <const bool minimize = true> void solve( std::vector<scalar_t> &x) {
+    const size_t dim = x.size();
+    this->inverse_hessian = std::vector<scalar_t>(dim * dim);
+    this->search_direction = std::vector<scalar_t>(dim, 0.0);
+    this->gradient = std::vector<scalar_t>(dim, 0.0);
+    // initialize to identity matrix
+    for(size_t i = 0; i < dim; i++) this->inverse_hessian[i + (i*dim)] = 1.0; 
+    while(true) {
+      this->step(x);
+      this->update();
+    }
+  }
+  // this should really be called "check" or happen within the loop above 
+  // template <class vector_t, class hessian_t>
+  // void Update(const function::State<scalar_t, vector_t, hessian_t> previous_function_state,
+  //             const function::State<scalar_t, vector_t, hessian_t> current_function_state,
+  //             const State &stop_state) {
+  //   if( std::isnan(previous_function_state.value)) {
+  //     status = Status::NaNLoss;
+  //     return;
+  //   }
+  //   num_iterations++;
+  //   f_delta =
+  //     fabs(current_function_state.value - previous_function_state.value);
+  //   x_delta = (current_function_state.x - previous_function_state.x)
+  //                                    .template lpNorm<Eigen::Infinity>();
+  //   gradient_norm =
+  //   current_function_state.gradient.template lpNorm<Eigen::Infinity>();
+  //   if ((stop_state.num_iterations > 0) &&
+  //       (num_iterations > stop_state.num_iterations)) {
+  //     status = Status::IterationLimit;
+  //     return;
+  //   }
+  //   if ((stop_state.x_delta > 0) && (x_delta < stop_state.x_delta)) {
+  //     x_delta_violations++;
+  //     if (x_delta_violations >= stop_state.x_delta_violations) {
+  //       status = Status::XDeltaViolation;
+  //       return;
+  //     }
+  //   } else {
+  //     x_delta_violations = 0;
+  //   }
+  //   if ((stop_state.f_delta > 0) && (f_delta < stop_state.f_delta)) {
+  //     f_delta_violations++;
+  //     if (f_delta_violations >= stop_state.f_delta_violations) {
+  //       status = Status::FDeltaViolation;
+  //       return;
+  //     }
+  //   } else {
+  //     f_delta_violations = 0;
+  //   }
+  //   if ((stop_state.gradient_norm > 0) &&
+  //       (gradient_norm < stop_state.gradient_norm)) {
+  //     status = Status::GradientNormViolation;
+  //     return;
+  //   }
+  //   if (previous_function_state.order == 2) {
+  //     if ((stop_state.condition_hessian > 0) &&
+  //         (condition_hessian > stop_state.condition_hessian)) {
+  //       status = Status::HessianConditionViolation;
+  //       return;
+  //     }
+  //   }
+  //   status = Status::Continue;
+  // }
+  
+  scalar_t step(std::vector<scalar_t> &x) {
+    // update search direction vector using -inverse_hessian * gradient
+    for(size_t j = 0; j < this->dim; j++) {
+      scalar_t temp = 0.0;
+      for(size_t i = 0; i < this->dim; i++) {
+        temp -= this->inverse_hessian[i + (j*this->dim)] * this->gradient[i];
+      }
+      this->search_direction[j] = temp; 
+    }
+    // 
+    scalar_t phi = 0.0;
+    for(size_t i = 0; i < this->dim; i++) {
+      phi += this->gradient[i] * this->search_direction[i];
+    }
+    if ((phi > 0) || std::isnan(phi)) {
+      std::fill(this->inverse_hessian.begin(), this->inverse_hessian.end(), 0.0);
+      // reset hessian approximation and search_direction 
+      for(size_t i = 0; i < this->dim; i++) {
+        this->inverse_hessian[i + (i*this->dim)] = 1.0; 
+        this->search_direction[i] = -this->gradient[i];
+      }
+    }
+    constexpr scalar_t rate = 0.0;
+    // const scalar_t rate = linesearch::MoreThuente<function_t, 1>::Search(
+    //   current, search_direction, function);
+    // update parameters
+    for(size_t i = 0; i < this->dim; i++) {
+      const scalar_t temp = rate * this->search_direction[i];
+      this->s[i] = temp;
+      x[i] += temp;
+    }
+    scalar_t val = f(x);
+    
+    // this also contains the updated gradient - so we should update the gradient 
+    // and record gradient step
+    // function_state_t next = f(current.x + rate * search_direction, 1);
+    
+    // Update inverse Hessian estimate.
+    // const vector_t s = rate * search_direction;
+    // const vector_t y = next.gradient - current.gradient;
+    const std::vector<scalar_t> y(x.size(), 0.0);    
+    const std::vector<scalar_t> rho(x.size(), 1.0);
+    // const scalar_t rho = 1.0 / y.dot(s);
+    
+    // update inverse hessian using some version of Sherman Morisson (though I am 
+    // not sure exactly where its coming from)
+    // inverse_hessian_ =
+    //   inverse_hessian_ -
+    //   rho * (s * (y.transpose() * inverse_hessian_) +
+    //   (inverse_hessian_ * y) * s.transpose()) +
+    //   rho * (rho * y.dot(inverse_hessian_ * y) + 1.0) * (s * s.transpose());
+    
+    return val;
+  }
+  void finite_gradient(std::vector<scalar_t> &x,
+                       std::vector<scalar_t> &grad,
+                       const int accuracy = 0) {
+    // The 'accuracy' can be 0, 1, 2, 3.
+    constexpr scalar_t eps = 2.2204e-6;
+    static const std::array<std::vector<scalar_t>, 4> coeff = {
+      {{1, -1},
+      {1, -8, 8, -1},
+      {-1, 9, -45, 45, -9, 1},
+      {3, -32, 168, -672, 672, -168, 32, -3}}};
+    static const std::array<std::vector<scalar_t>, 4> coeff2 = {
+      {{1, -1},
+      {-2, -1, 1, 2},
+      {-3, -2, -1, 1, 2, 3},
+      {-4, -3, -2, -1, 1, 2, 3, 4}}};
+    static const std::array<scalar_t, 4> dd = {2, 12, 60, 840};
+    
+    const int innerSteps = 2 * (accuracy + 1);
+    const scalar_t ddVal = dd[accuracy] * eps;
+    
+    for (size_t d = 0; d < x.size(); d++) {
+      grad[d] = 0;
+      for (int s = 0; s < innerSteps; ++s) {
+        scalar_t tmp = x[d];
+        x[d] += coeff2[accuracy][s] * eps;
+        grad[d] += coeff[accuracy][s] * f(x);
+        x[d] = tmp;
+      }
+      grad[d] /= ddVal;
+    }
+  }
+  // A O(n^2) implementation of the Sherman Morisson update formula 
+  template <const size_t max_size = 20> void
+    sherman_morrison_update(
+      std::vector<scalar_t> &A,
+      const std::vector<scalar_t> &g) {
+      const size_t p = g.size();
+      std::array<scalar_t, max_size> temp_left, temp_right;
+      scalar_t denominator = 1.0;
+      // this is actually just a multiplication of 2 distinct vectors - Ag' and gA
+      for(size_t j = 0; j < p; j++) {
+        scalar_t tmp = 0.0, denom_tmp = 0.0;
+        for(size_t i = 0; i < p; i++) {
+          // dereference once and put on the stack - hopefully faster than 
+          // using two dereferences via operator []
+          scalar_t g_i = g[i];
+          tmp += A[(i*p) + j] * g_i;
+          denom_tmp += A[(j*p) + i] * g_i;
+        }
+        denominator += denom_tmp * g[j];
+        // this is the first vector
+        temp_left[j] = tmp;
+        temp_right[j] = denom_tmp;
+      }
+      // this loop is only not superfluous since we do not know the denominator
+      for(size_t j = 0; j < p; j++) {
+        // likewise avoid extra dereferences via operator []
+        const scalar_t tmp = temp_right[j];
+        for(size_t i = 0; i < p; i++) {
+          A[(p*j) + i] -= (temp_left[i] * tmp)/denominator;
+        }
+      }
+    }
+//   void armijo_search(const state_t &state,
+//                      const vector_t &search_direction) {
+//     constexpr scalar_t c = 0.2;
+//     constexpr scalar_t rho = 0.9;
+//     scalar_t alpha = 1.0;
+//     scalar_t search_val = this->f(state.x + alpha * search_direction);
+//     const scalar_t f_in = state.value;
+//     const scalar_t cache = c * state.gradient.dot(search_direction);
+//     
+//     while (f > f_in + alpha * cache) {
+//       alpha *= rho;
+//       search_val = this->f(state.x + alpha * search_direction);
+//     }
+//     return alpha;
+// };
 };
+}
 
 namespace nlsolver::rng {
 
