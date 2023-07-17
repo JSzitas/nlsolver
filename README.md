@@ -3,7 +3,7 @@
 The main goal of this library is to be as easy to use as possible, while providing 
 good performance, and enough flexibility to be useful. For this reason, 
 the library has no third party dependencies, requires no complex includes, 
-no additional magic. 
+no additional magic. Just a C++17 compliant compiler and a problem to solve :)
 
 Just copy the header into your project, include and use:
 
@@ -21,7 +21,14 @@ Just copy the header into your project, include and use:
   + Vanilla
   + Accelerated
   + Adaptive (planned)
-* CVA-ES *[Work in progress]*
+* Simulated Annealing 
+  + Currently without option for custom sample generators, only using the Markov Gaussian Kernel 
+  
+## Work in progress
+* CVA-ES 
+* BFGS
+  + probably based on existing work in e.g. https://github.com/PatWie/CppNumericalSolvers, but still 
+    dependency free
 
 # Roadmap 
 
@@ -75,17 +82,21 @@ int main() {
 }
 ```
 
-Or run all examples from the commmand line with **make**:
+Or run all examples from the command line with **make**:
 ```{bash}
 make example
 ```
 
+And run the examples from the command line
+```{bash}
+./example
+```
 
 # Design notes
 
 There are some design decisions in this library which warrant discussion: 
 
-* the objective functions to minimize/ maximize are always passed as functors, 
+* the objective functions to minimize/ maximize are passed as objects, prefering functors, 
 requiring an overloaded **public** **()** operator which takes a **std::vector<T>**, e.g. 
 ```cpp
 struct example {
@@ -94,6 +105,7 @@ struct example {
   }
 };
 ```
+note that this will also work with lambda functions, and a struct/class is not strictly necessary.[^lambda_note] (See example usage.)
 
 * there are no virtual calls in this library - thus incurring no performance penalty
 * each function exposes both a minimization and a maximization interface, and maximization is 
@@ -101,15 +113,25 @@ struct example {
 * all optimizers come with default arguments that try to be sane and user friendly - but expert 
   users are highly encouraged to supply their own values
 * currently no multi-threading is supported - this is by design as functors are *potentially*
-  stateful objective functions and multi-threading would require ensuring no data races happen. 
+  stateful objective functions and multi-threading would require ensuring no data races happen
   
 Additionally, this library also includes a set of (pseudo)-random and (quasi)-random number generators
-that also aim to get out of the way as much as possible, all of which are also implemented as functors. 
+that also aim to get out of the way as much as possible, all of which are implemented as functors. 
 The library thus assumes that functors are used for random number generation - there is an example on 
 how to use standard library random number generators if one chooses to do so. 
   
 # Contributing
 
 Feel free to open an issue or create a PR if you feel that an important piece of functionality is missing!
-Just keep civil, and try to keep within the spirit of the library (no dependencies, no virtual calls, all minimizers 
-take functors as objective functions, and objective functions are impure). 
+Just keep civil, and stay within the spirit of the library (no dependencies, no virtual calls, must support 
+impure objective functions). 
+
+# Notes
+
+[^lambda_note]: This flexibility is included for cases where you want to implicitly bundle mutable data within 
+the struct, and do not want to have to pass the data (e.g. through a pointer) to your objective function. 
+This makes the overall design cleaner - if your objective function needs data, mainstains state, or 
+does anything else on evaluation, you can keep the entirety of that within the struct (and even extract it 
+after the solver finishes). If you do not need the functionality and you simply want to optimize some ad-hoc function, using 
+a lambda is probably much simpler and cleaner. 
+

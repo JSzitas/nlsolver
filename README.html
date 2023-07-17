@@ -371,7 +371,8 @@ Optimizers</h1>
 <p>The main goal of this library is to be as easy to use as possible,
 while providing good performance, and enough flexibility to be useful.
 For this reason, the library has no third party dependencies, requires
-no complex includes, no additional magic.</p>
+no complex includes, no additional magic. Just a C++17 compliant
+compiler and a problem to solve :)</p>
 <p>Just copy the header into your project, include and use:</p>
 <pre class="cpp"><code>#include &quot;nlsolver.h&quot;</code></pre>
 </div>
@@ -391,8 +392,23 @@ explanation of different strategies)
 <li>Accelerated</li>
 <li>Adaptive (planned)</li>
 </ul></li>
-<li>CVA-ES <em>[Work in progress]</em></li>
+<li>Simulated Annealing
+<ul>
+<li>Currently without option for custom sample generators, only using
+the Markov Gaussian Kernel</li>
+</ul></li>
 </ul>
+<div id="work-in-progress" class="section level2">
+<h2>Work in progress</h2>
+<ul>
+<li>CVA-ES</li>
+<li>BFGS
+<ul>
+<li>probably based on existing work in e.g. <a href="https://github.com/PatWie/CppNumericalSolvers" class="uri">https://github.com/PatWie/CppNumericalSolvers</a>, but still
+dependency free</li>
+</ul></li>
+</ul>
+</div>
 </div>
 <div id="roadmap" class="section level1">
 <h1>Roadmap</h1>
@@ -445,17 +461,19 @@ int main() {
 
   return 0;
 }</code></pre>
-<p>Or run all examples from the commmand line with
+<p>Or run all examples from the command line with
 <strong>make</strong>:</p>
 <pre class="{bash}"><code>make example</code></pre>
+<p>And run the examples from the command line</p>
+<pre class="{bash}"><code>./example</code></pre>
 </div>
 <div id="design-notes" class="section level1">
 <h1>Design notes</h1>
 <p>There are some design decisions in this library which warrant
 discussion:</p>
 <ul>
-<li>the objective functions to minimize/ maximize are always passed as
-functors, requiring an overloaded <strong>public</strong>
+<li>the objective functions to minimize/ maximize are passed as objects,
+prefering functors, requiring an overloaded <strong>public</strong>
 <strong>()</strong> operator which takes a
 <strong>std::vector<T></strong>, e.g. </li>
 </ul>
@@ -464,34 +482,52 @@ functors, requiring an overloaded <strong>public</strong>
     return (x[0] + x[1])/(1-x[2]);
   }
 };</code></pre>
+<p>note that this will also work with lambda functions, and a
+struct/class is not strictly necessary.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a> (See example
+usage.)</p>
 <ul>
 <li>there are no virtual calls in this library - thus incurring no
 performance penalty</li>
 <li>each function exposes both a minimization and a maximization
 interface, and maximization is always implemented as ‘negative
-minimization’, i.e. by multiply the objective function by -1</li>
+minimization’, i.e. by multiplying the objective function by -1</li>
 <li>all optimizers come with default arguments that try to be sane and
 user friendly - but expert users are highly encouraged to supply their
 own values</li>
 <li>currently no multi-threading is supported - this is by design as
 functors are <em>potentially</em> stateful objective functions and
-multi-threading would require ensuring no data races happen due to this
-stateful nature.</li>
+multi-threading would require ensuring no data races happen</li>
 </ul>
 <p>Additionally, this library also includes a set of (pseudo)-random and
 (quasi)-random number generators that also aim to get out of the way as
-much as possible, all of which are also implemented as functors. The
-library thus assumes that functors are used for random number generation
-- we demonstrate how to use standard library random number generators if
+much as possible, all of which are implemented as functors. The library
+thus assumes that functors are used for random number generation - there
+is an example on how to use standard library random number generators if
 one chooses to do so.</p>
 </div>
 <div id="contributing" class="section level1">
 <h1>Contributing</h1>
 <p>Feel free to open an issue or create a PR if you feel that an
-important piece of functionality is missing! Just keep civil, and try to
-keep within the spirit of the library (no dependencies, no virtual
-calls, all minimizers take functors as objective functions, and
-objective functions are impure).</p>
+important piece of functionality is missing! Just keep civil, and stay
+within the spirit of the library (no dependencies, no virtual calls,
+must support impure objective functions).</p>
+</div>
+<div id="notes" class="section level1">
+<h1>Notes</h1>
+</div>
+<div class="footnotes footnotes-end-of-document">
+<hr />
+<ol>
+<li id="fn1"><p>This flexibility is included for cases where you want to
+implicitly bundle mutable data within the struct, and do not want to
+have to pass the data (e.g. through a pointer) to your objective
+function. This makes the overall design cleaner - if your objective
+function needs data, mainstains state, or does anything else on
+evaluation, you can keep the entirety of that within the struct (and
+even extract it after the solver finishes). If you do not need the
+functionality and you simply want to optimize some ad-hoc function,
+using a lambda is probably much simpler and cleaner.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+</ol>
 </div>
 
 
