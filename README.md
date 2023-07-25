@@ -20,9 +20,12 @@ Just copy the header into your project, include and use:
 * Particle Swarm Optimization 
   + Vanilla
   + Accelerated
-  + Adaptive (planned)
 * Simulated Annealing 
   + Currently without option for custom sample generators, only using the Markov Gaussian Kernel 
+  
+## Experimental 
+  
+* Nelder-Mead PSO hybrid (in namespace **nlsolver::experimental**)
   
 ## Work in progress
 * CVA-ES 
