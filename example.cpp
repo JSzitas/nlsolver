@@ -1,11 +1,15 @@
 #include "nlsolver.h"
 
+// baseline 'tried and tested' solvers
 using nlsolver::NelderMeadSolver;
 using nlsolver::DESolver;
 using nlsolver::PSOSolver;
 using nlsolver::SANNSolver;
 using nlsolver::rng::xorshift;
 using nlsolver::rng::xoshiro;
+
+// experimental solvers 
+using nlsolver::experimental::NelderMeadPSO;
 
 class Rosenbrock {
 public:
@@ -157,6 +161,19 @@ int main() {
   sann_res.print();
   print_vector(sann_init);
   
+  std::cout << "NelderMead-PSO hybrid with xoshiro: " << std::endl;
+  // we also have an accelerated version - we reset the RNG as well. 
+  xos_gen.reset();
+  auto nm_pso_solver = NelderMeadPSO<Rosenbrock,
+                                     xoshiro<double>,
+                                     double> (prob, xos_gen);
+  // set initial state - if no bounds are given, default initial parameters are 
+  // taken roughly as the scale of the parameter space
+  std::vector<double> nm_pso_init = {3,3};
+  auto nm_pso_res = nm_pso_solver.minimize(nm_pso_init);
+  nm_pso_res.print();
+  print_vector(nm_pso_init);
+
   return 0;
 }
 
