@@ -1,12 +1,10 @@
-CPP = clang++
-CPPFLAGS  = -std=c++17 -O3 -Wall -march=native
+all: debug example
 
-TARGET = example
-
-all: $(TARGET)
-
-$(TARGET): $(TARGET).cpp
-		$(CPP) $(CPPFLAGS) -o $(TARGET) $(TARGET).cpp
-
+debug:
+	clang++ -std=c++17 -O0 -g example.cpp -o debug
+example:
+	clang++ -std=c++17 -O3 -Wall -march=native example.cpp -o example
 clean:
-	$(RM) $(TARGET)
+	rm -rf debug example
+
+
