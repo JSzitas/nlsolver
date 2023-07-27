@@ -169,19 +169,44 @@ template <typename scalar_t = double> inline void update_centroid(
 
 // note that expand and contract are the same action - thus we only define one
 // function - transform
-template <typename scalar_t = double, const bool reflect = false>
-inline void transform( 
+// template <typename scalar_t = double, const bool reflect = false>
+// inline void transform( 
+//     const std::vector<scalar_t> &point,
+//     const std::vector<scalar_t> &centroid,
+//     std::vector<scalar_t> &result,
+//     const scalar_t coef) {
+//   for( size_t i= 0; i < point.size(); i++) {
+//     if constexpr(reflect) {
+//       result[i] = centroid[i] + coef * (centroid[i] - point[i]);
+//     }
+//     else {
+//       result[i] = centroid[i] + coef * (point[i] - centroid[i]);
+//     }
+//   }
+// }
+// bound version 
+template <typename scalar_t = double,
+          const bool reflect = false,
+          const bool bound = false>
+inline void simplex_transform( 
     const std::vector<scalar_t> &point,
     const std::vector<scalar_t> &centroid,
     std::vector<scalar_t> &result,
-    const scalar_t coef) {
+    const scalar_t coef,
+    const std::vector<scalar_t> &upper,
+    const std::vector<scalar_t> &lower) {
   for( size_t i= 0; i < point.size(); i++) {
+    scalar_t temp = 0.0;
     if constexpr(reflect) {
-      result[i] = centroid[i] + coef * (centroid[i] - point[i]);
+      temp = centroid[i] + coef * (centroid[i] - point[i]);
     }
     else {
-      result[i] = centroid[i] + coef * (point[i] - centroid[i]);
+      temp = centroid[i] + coef * (point[i] - centroid[i]);
     }
+    if constexpr(bound) {
+      temp = std::clamp(temp, lower[i], upper[i]);
+    }
+    result[i] = temp;
   }
 }
 
@@ -258,7 +283,6 @@ private:
   std::vector<scalar_t> point_values;
   size_t best_point, worst_point;
   const size_t max_iter, no_change_best_tol, restarts;
-  std::optional<std::vector<scalar_t>> lower, upper;
 public:
   // constructor
   NelderMeadSolver<Callable, scalar_t>( Callable &f,
@@ -276,9 +300,10 @@ public:
     restarts(restarts) {}
   // minimize interface
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x) {
-    auto res = this->solve<true, false>(x);
+    std::vector<scalar_t> upper, lower;
+    auto res = this->solve<true, false>(x, upper, lower);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<true, false>(x));
+      res.add(this->solve<true, false>(x, upper, lower));
     }
     return res;
   }
@@ -286,19 +311,18 @@ public:
   solver_status<scalar_t> minimize( std::vector<scalar_t> &x,
                                     const std::vector<scalar_t> &upper,
                                     const std::vector<scalar_t> &lower) {
-    this->upper = upper;
-    this->lower = lower;
-    auto res = this->solve<true, true>(x);
+    auto res = this->solve<true, true>(x, upper, lower);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<true, true>(x));
+      res.add(this->solve<true, true>(x, upper, lower));
     }
     return res;
   }
   // maximize interface
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x) {
-    auto res = this->solve<false, false>(x);
+    std::vector<scalar_t> upper, lower;
+    auto res = this->solve<false, false>(x, upper, lower);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<false, false>(x));
+      res.add(this->solve<false, false>(x, upper, lower));
     }
     return res;
   }
@@ -306,18 +330,18 @@ public:
   solver_status<scalar_t> maximize( std::vector<scalar_t> &x,
                                     const std::vector<scalar_t> &upper,
                                     const std::vector<scalar_t> &lower) {
-    this->upper = upper;
-    this->lower = lower;
-    auto res = this->solve<false, true>(x);
+    auto res = this->solve<false, true>(x, upper, lower);
     for( size_t i = 0; i < this->restarts; i++ ) {
-      res.add(this->solve<false, true>(x));
+      res.add(this->solve<false, true>(x, upper, lower));
     }
     return res;
   }
 private:
   template <const bool minimize = true,
             const bool bound = false> solver_status<scalar_t> 
-  solve( std::vector<scalar_t> & x) {
+  solve( std::vector<scalar_t> &x,
+         const std::vector<scalar_t> &upper,
+         const std::vector<scalar_t> &lower) {
     // set up simplex
     simplex<scalar_t> current_simplex( x, this->step);
     std::vector<scalar_t> scores(current_simplex.size());
@@ -386,58 +410,40 @@ private:
       // compute centroid of all points except for the worst one 
       update_centroid(centroid, current_simplex, worst);
       // reflect worst point 
-      transform<scalar_t, true>(current_simplex.vals[worst], centroid, temp_reflect, this->alpha);
+      simplex_transform<scalar_t, true, bound>(
+            current_simplex.vals[worst], centroid, temp_reflect, this->alpha,
+            upper, lower);
       // score reflected point
       ref_score = f_multiplier * f(temp_reflect);
       function_calls_used++;
       // if reflected point is better than second worst, but not better than the best 
       if( ref_score >= scores[best] && ref_score < scores[second_worst]) {
-        if constexpr(bound) {
-          current_simplex.replace(temp_reflect, worst, *this->upper, *this->lower);
-        }
-        if constexpr(!bound) {
           current_simplex.replace(temp_reflect, worst);
-        }
         // otherwise if this is the best score so far, expand
       } else if( ref_score < scores[best] ) {
-        transform(temp_reflect, centroid, temp_expand, this->gamma);
+        simplex_transform<scalar_t, false, bound>(
+            temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
         // obtain score for expanded point 
         exp_score = f_multiplier * f(temp_expand);
         function_calls_used++;
         // if this is better than the expanded point score, replace the worst point 
         // with the expanded point, otherwise replace it with the reflected point 
-        if constexpr(bound) {
-          current_simplex.replace(
-            exp_score < ref_score ? temp_expand : temp_reflect,
-                        worst,
-                        *this->upper,
-                        *this->lower);
-        }
-        if constexpr(!bound) {
-          current_simplex.replace(
-            exp_score < ref_score ? temp_expand : temp_reflect,
-                        worst);
-        }
-        
+        current_simplex.replace(
+          exp_score < ref_score ? temp_expand : temp_reflect, worst);
         scores[worst] = exp_score < ref_score ? exp_score : ref_score;
         // otherwise we have a point  worse than the 'second worst'
       } else {
         // contract outside
-        transform( ref_score < scores[worst] ? temp_reflect : 
+        simplex_transform<scalar_t, true, bound>( ref_score < scores[worst] ? temp_reflect : 
                     // or point is the worst point so far - contract inside
                     current_simplex.vals[worst],
-                                        centroid, temp_contract, this->rho);
+                                        centroid, temp_contract, this->rho, upper, lower);
         cont_score = f_multiplier * f(temp_contract);
         function_calls_used++;
         // if this contraction is better than the reflected point or worst point, respectively
         if( cont_score < ( ref_score < scores[worst] ? ref_score : scores[worst]) ) {
           // replace worst point with contracted point 
-          if constexpr(bound) {
-            current_simplex.replace( temp_contract, worst, *this->upper, *this->lower);
-          }
-          if constexpr(!bound) {
-            current_simplex.replace(temp_contract, worst);
-          }
+          current_simplex.replace(temp_contract, worst);
           scores[worst] = cont_score;
           // otherwise shrink 
         } else {
@@ -494,7 +500,6 @@ template <typename RNG> static inline std::array<size_t,4> generate_indices(
     RNG& generator ) {
   // prepase set for uniqueness checks
   std::unordered_set<size_t> used_set = {};
-  // used_set.reserve(max);
   // fixed is the reference agent - hence should already be in the set
   used_set.insert(fixed);
   // set result array
@@ -582,7 +587,7 @@ private:
     std::vector<scalar_t> scores(agents.size());
     // evaluate all randomly generated agents 
     for( size_t i = 0; i < agents.size(); i++ ) {
-      scores[i] =  f_multiplier * this->f(agents[i]);
+      scores[i] = f_multiplier * this->f(agents[i]);
     }
     size_t function_calls_used = agents.size();
     scalar_t score = 0;
@@ -1214,7 +1219,7 @@ private:
     // update centroid of all points except for the worst one
     this->update_centroid(centroid, current_order, nm_particles-1);
     // reflect worst point
-    transform<scalar_t, true>(this->particle_positions[nm_particles-1], centroid, temp_reflect, this->alpha);
+    simplex_transform<scalar_t, true, bound>(this->particle_positions[nm_particles-1], centroid, temp_reflect, this->alpha, upper, lower);
     // set constant multiplier for minimization 
     constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     // score reflected point
@@ -1222,26 +1227,16 @@ private:
     this->function_calls_used++;
     // if reflected point is better than second worst, but not better than the best
     if( ref_score >= best_score && ref_score < this->particle_current_values[second_worst_id]) {
-      if constexpr(bound) {
-        for(size_t i = 0; i < n_dim; i++) {
-          std::clamp(temp_reflect[i], lower[i], upper[i]);
-        }
-      }
       this->particle_positions[worst_id] = temp_reflect;
       // otherwise if this is the best score so far, expand
     } else if( ref_score < best_score ) {
-      transform(temp_reflect, centroid, temp_expand, this->gamma);
+      simplex_transform<scalar_t, false, bound>(temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
       // obtain score for expanded point
       const scalar_t exp_score = f_multiplier * f(temp_expand);
       this->function_calls_used++;
       // if this is better than the expanded point score, replace the worst point
       // with the expanded point, otherwise replace it with the reflected point
       std::vector<scalar_t> &replacement = exp_score < ref_score ? temp_expand : temp_reflect;
-      if constexpr(bound) {
-        for(size_t i = 0; i < n_dim; i++) {
-          std::clamp(replacement[i], lower[i], upper[i]);
-        }
-      }
       this->particle_positions[worst_id] = replacement;
       this->particle_current_values[worst_id] = 
         exp_score < ref_score ? exp_score : ref_score;
@@ -1250,19 +1245,14 @@ private:
       // contract outside - here we overwrite the 'temp_expand' and it functionally 
       // becomes 'temp_contract'
       const scalar_t worst_score = this->particle_current_values[worst_id];
-      transform( ref_score < worst_score ? temp_reflect :
+      simplex_transform<scalar_t, false, bound>( ref_score < worst_score ? temp_reflect :
                  // or point is the worst point so far - contract inside
-                 this->particle_positions[worst_id], centroid, temp_expand, this->rho);
+                 this->particle_positions[worst_id], centroid, temp_expand, this->rho, upper, lower);
       const scalar_t cont_score = f_multiplier * f(temp_expand);
       this->function_calls_used++;
       // if this contraction is better than the reflected point or worst point, respectively
       if( cont_score < ( ref_score < worst_score ? ref_score : worst_score) ) {
         // replace worst point with contracted point
-        if constexpr(bound) {
-          for(size_t i = 0; i < n_dim; i++) {
-            std::clamp(temp_expand[i], lower[i], upper[i]);
-          }
-        }
         this->particle_positions[worst_id] = temp_expand;
         this->particle_current_values[worst_id] = cont_score;
         // otherwise shrink
@@ -1313,7 +1303,7 @@ private:
           // social update (moving more if further away from 'best' position of swarm)
           this->social_coef * r_g * (best[j] - particle[j]);
         if constexpr(bound) {
-          std::clamp(temp, lower[i], upper[i]);
+          temp = std::clamp(temp, lower[i], upper[i]);
         }
         velocity[j] = temp;
         particle[j] += temp;

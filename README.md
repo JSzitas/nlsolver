@@ -22,10 +22,11 @@ Just copy the header into your project, include and use:
   + Accelerated
 * Simulated Annealing 
   + Currently without option for custom sample generators, only using the Markov Gaussian Kernel 
+* Nelder-Mead PSO hybrid
+  + Still slightly experimental - should work without much issue, but might under-perform other 
+    solvers, particularly on simpler problems where the function to optimize over is quite flat
   
 ## Experimental 
-  
-* Nelder-Mead PSO hybrid (in namespace **nlsolver::experimental**)
   
 ## Work in progress
 * CVA-ES 
