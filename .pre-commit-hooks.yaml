@@ -1,0 +1,7 @@
+repos:
+-   repo: https://github.com/bmorcos/pre-commit-hooks-cpp
+    rev: master
+    hooks:
+    -   id: clang-format
+    -   id: cpplint
+    -   id: cppcheck
