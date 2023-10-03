@@ -23,8 +23,12 @@ Just copy the header into your project, include and use:
 * Simulated Annealing 
   + Currently without option for custom sample generators, only using the Markov Gaussian Kernel 
 * Nelder-Mead PSO hybrid
-  + Still slightly experimental - should work without much issue, but might under-perform other 
-    solvers, particularly on simpler problems where the function to optimize over is quite flat
+  + Might under-perform other solvers, but should do better than vanilla Nelder-Mead on problems with 
+  many local minima where Nelder-Mead can get stuck
+* Gradient Descent 
+  + Several flavours, including Vanilla with fixed steps, steps optimized using MoreThuente linesearch, 
+  and even an implementation of [Provably Faster Gradient Descent via Long Steps](https://arxiv.org/abs/2307.06324) 
+  in case you have a particularly well behaved smooth convex problem.
   
 ## Experimental 
   
@@ -33,7 +37,8 @@ Just copy the header into your project, include and use:
 * BFGS
   + probably based on existing work in e.g. https://github.com/PatWie/CppNumericalSolvers, but still 
     dependency free
-
+* LMA     
+    
 # Roadmap 
 
 The goal going forward would be to implement two kinds of constructs for constrained 
