@@ -3,4 +3,4 @@ project(nlsolver)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_library(nlsolver library.cpp)
+add_library(nlsolver example.cpp)
