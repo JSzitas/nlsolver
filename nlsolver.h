@@ -2102,10 +2102,9 @@ struct fin_diff {
 
 template <typename Callable, typename scalar_t,
           const GradientStepType step = GradientStepType::Fixed,
-          const size_t bigstep_level = 3,
+          const size_t bigstep_level = 5,
           const bool grad_norm_lipschitz_scaling = true,
-          typename Grad = fin_diff<Callable, scalar_t>,
-          const bool verbose = true>
+          typename Grad = fin_diff<Callable, scalar_t>>
 class GradientDescent {
   Callable &f;
   Grad g;
@@ -2139,12 +2138,11 @@ class GradientDescent {
   std::vector<scalar_t> search_direction, linesearch_temp;
 
  public:
-  explicit GradientDescent<Callable, scalar_t, GradientStepType, size_t, bool,
-                           Grad, bool>(Callable &f,
-                                       Grad g = fin_diff<Callable, scalar_t>(),
-                                       const size_t max_iter = 500,
-                                       const scalar_t grad_eps = 1e-12,
-                                       const scalar_t alpha = 0.03)
+  explicit GradientDescent<Callable, scalar_t, step, bigstep_level,
+                           grad_norm_lipschitz_scaling, Grad>(
+      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
+      const size_t max_iter = 500, const scalar_t grad_eps = 1e-12,
+      const scalar_t alpha = 0.03)
       : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
   // minimize interface
   solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {

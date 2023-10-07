@@ -19,12 +19,13 @@
 
 // baseline 'tried and tested' solvers
 using nlsolver::DE;
+using nlsolver::GradientDescent;
 using nlsolver::NelderMead;
 using nlsolver::NelderMeadPSO;
 using nlsolver::PSO;
 using nlsolver::SANN;
+// helper definition for GDType
 using GDType = nlsolver::GradientStepType;
-using nlsolver::GradientDescent;
 
 using nlsolver::ConjugatedGradientDescent;
 
