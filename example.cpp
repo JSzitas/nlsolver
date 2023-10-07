@@ -18,15 +18,19 @@
 #include "nlsolver.h"  // NOLINT
 
 // baseline 'tried and tested' solvers
-using nlsolver::DESolver;
-using nlsolver::GradientDescent;
+using nlsolver::DE;
+using nlsolver::NelderMead;
 using nlsolver::NelderMeadPSO;
-using nlsolver::NelderMeadSolver;
-using nlsolver::PSOSolver;
-using nlsolver::SANNSolver;
+using nlsolver::PSO;
+using nlsolver::SANN;
+using GDType = nlsolver::GradientStepType;
+using nlsolver::GradientDescent;
+
+using nlsolver::ConjugatedGradientDescent;
+
+// RNG
 using nlsolver::rng::xorshift;
 using nlsolver::rng::xoshiro;
-using GDType = nlsolver::GradientStepType;
 
 // experimental solvers
 
@@ -48,7 +52,7 @@ void print_vector(std::vector<double> &x) {
 
 // to use any C++ standard random number generator just pass in a generator
 // functor e.g. using Mersene Twister
-#include <cstdint>
+#include <cstdint>  // NOLINT
 #include <random>
 struct std_MT {
  private:
@@ -68,7 +72,7 @@ int main() {
   Rosenbrock prob;
   std::cout << "Nelder-Mead: " << std::endl;
   // initialize solver - passing the functor
-  auto nm_solver = NelderMeadSolver<Rosenbrock>(prob);
+  auto nm_solver = NelderMead<Rosenbrock>(prob);
   // initialize function arguments
   std::vector<double> nm_init = {2, 7};
   auto nm_res = nm_solver.minimize(nm_init);
@@ -84,7 +88,7 @@ int main() {
     const double t2 = (x[1] - x[0] * x[0]);
     return t1 * t1 + 100 * t2 * t2;
   };
-  auto nm_solver_lambda = NelderMeadSolver(RosenbrockLambda);
+  auto nm_solver_lambda = NelderMead(RosenbrockLambda);
   // initialize function arguments
   nm_init = {2, 7};
   // nm_init[0] = 2;
@@ -103,7 +107,7 @@ int main() {
   xorshift<double> gen;
   // again initialize solver, this time also with the RNG
   auto de_solver =
-      DESolver<Rosenbrock, xorshift<double>, double, DEStrat::best>(prob, gen);
+      DE<Rosenbrock, xorshift<double>, double, DEStrat::best>(prob, gen);
 
   std::vector<double> de_init = {2, 7};
 
@@ -116,7 +120,7 @@ int main() {
   std_MT std_gen;
   // again initialize solver, this time also with the RNG
   // if strategy is not specifieed, defaults to random
-  auto de_solver_MT = DESolver<Rosenbrock, std_MT, double>(prob, std_gen);
+  auto de_solver_MT = DE<Rosenbrock, std_MT, double>(prob, std_gen);
   // reset initial state
   de_init[0] = 2;
   de_init[1] = 7;
@@ -131,8 +135,7 @@ int main() {
   // add PSO Solver Type - defaults to random
   using nlsolver::PSOType;
   // again initialize solver, this time also with the RNG
-  auto pso_solver =
-      PSOSolver<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
+  auto pso_solver = PSO<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
   std::vector<double> pso_init = {3, 3};
@@ -156,8 +159,8 @@ int main() {
   // we also have an accelerated version - we reset the RNG as well.
   xos_gen.reset();
   auto apso_solver =
-      PSOSolver<Rosenbrock, xoshiro<double>, double, PSOType::Accelerated>(
-          prob, xos_gen);
+      PSO<Rosenbrock, xoshiro<double>, double, PSOType::Accelerated>(prob,
+                                                                     xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
   std::vector<double> apso_init = {3, 3};
@@ -168,8 +171,7 @@ int main() {
   std::cout << "Simulated Annealing with xoshiro: " << std::endl;
   // we also have an accelerated version - we reset the RNG as well.
   xos_gen.reset();
-  auto sann_solver =
-      SANNSolver<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
+  auto sann_solver = SANN<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
   std::vector<double> sann_init = {3, 3};
@@ -216,6 +218,14 @@ int main() {
   auto gd_res_bigstep = gd_solver_bigstep.minimize(gd_init_bigstep);
   gd_res_bigstep.print();
   print_vector(gd_init_bigstep);
+
+  std::cout << "Conjugated Gradient Descent (always requires linesearch)"
+            << std::endl;
+  auto cgd_solver = ConjugatedGradientDescent<Rosenbrock, double>(prob);
+  std::vector<double> cgd_init = {2, 2};
+  auto cgd_res = cgd_solver.minimize(cgd_init);
+  cgd_res.print();
+  print_vector(cgd_init);
 
   return 0;
 }

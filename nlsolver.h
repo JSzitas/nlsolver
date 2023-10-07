@@ -38,6 +38,218 @@
 #include <utility>
 #include <vector>
 
+// mostly dot products and other fun stuff
+namespace nlsolver::math {
+template <typename T>
+inline T dot(const T *x, const T *y, int f) {
+  T s = 0;
+  for (int z = 0; z < f; z++) {
+    s += (*x) * (*y);
+    x++;
+    y++;
+  }
+  return s;
+}
+
+template <typename T>
+inline T fast_sum(const T *x, int size) {
+  T result = 0;
+  for (int i = 0; i < size; i++) {
+    result += (*x);
+    x++;
+  }
+  return result;
+}
+
+template <typename T>
+inline T vec_scalar_mult(const T *vec, const T *scalar, int f) {
+  T result = 0;
+  // load single scalar
+  // Don't forget the remaining values.
+  for (int i = 0; i < f; i++) {
+    result += *vec * *scalar;
+    vec++;
+  }
+  return result;
+}
+
+// inspired by annoylib, see
+// https://github.com/spotify/annoy/blob/main/src/annoylib.h
+#if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
+    (__GNUC__ > 6) && defined(__AVX512F__)
+#define DOT_USE_AVX512
+#endif
+#if !defined(NO_MANUAL_VECTORIZATION) && defined(__AVX__) && \
+    defined(__SSE__) && defined(__SSE2__) && defined(__SSE3__)
+#define DOT_USE_AVX
+#endif
+
+#if defined(DOT_USE_AVX) || defined(DOT_USE_AVX512)
+#if defined(_MSC_VER)
+#include <intrin.h>
+#elif defined(__GNUC__)
+#include <x86intrin.h>
+#endif
+#endif
+
+#ifdef DOT_USE_AVX
+// Horizontal single sum of 256bit vector.
+inline float hsum256_ps_avx(__m256 v) {
+  const __m128 x128 =
+      _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
+  const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+  const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+  return _mm_cvtss_f32(x32);
+}
+
+inline double hsum256_pd_avx(__m256d v) {
+  __m128d vlow = _mm256_castpd256_pd128(v);
+  __m128d vhigh = _mm256_extractf128_pd(v, 1);  // high 128
+  vlow = _mm_add_pd(vlow, vhigh);               // reduce down to 128
+  __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
+  return _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
+}
+
+// overload
+template <>
+inline float dot<float>(const float *x, const float *y, int f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d,
+                        _mm256_mul_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y)));
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+// second overload
+template <>
+inline double dot<double>(const double *x, const double *y, int f) {
+  double result = 0;
+  if (f > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_add_pd(d,
+                        _mm256_mul_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(y)));
+      x += 4;
+      y += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+template <>
+inline float fast_sum<float>(const float *x, int size) {
+  float result = 0;
+  if (size > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; size > 7; size -= 8) {
+      d = _mm256_add_ps(d, _mm256_loadu_ps(x));
+      x += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; size > 0; size--) {
+    result += *x;
+    x++;
+  }
+  return result;
+}
+
+template <>
+inline double fast_sum<double>(const double *x, int size) {
+  double result = 0;
+  if (size > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; size > 3; size -= 4) {
+      d = _mm256_add_pd(d, _mm256_loadu_pd(x));
+      x += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; size > 0; size--) {
+    result += *x;
+    x++;
+  }
+  return result;
+}
+
+// multiply a vector by scalar
+template <>
+inline float vec_scalar_mult<float>(const float *vec, const float *scalar,
+                                    int f) {
+  float result = 0;
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(*scalar);
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d, _mm256_mul_ps(_mm256_loadu_ps(vec), s));
+      vec += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *vec * *scalar;
+    vec++;
+  }
+  return result;
+}
+
+// overload for doubles
+template <>
+inline double vec_scalar_mult<double>(const double *vec, const double *scalar,
+                                      int f) {
+  double result = 0;
+  // load single scalar
+  const __m256d s = _mm256_set1_pd(*scalar);
+  if (f > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_add_pd(d, _mm256_mul_pd(_mm256_loadu_pd(vec), s));
+      vec += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *vec * *scalar;
+    vec++;
+  }
+  return result;
+}
+
+#endif
+
+}  // namespace nlsolver::math
+
 namespace nlsolver::finite_difference {
 // The 'accuracy' can be 0, 1, 2, 3.
 template <typename Callable, typename scalar_t, const size_t accuracy = 0>
@@ -332,7 +544,7 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
   if (dginit >= 0.0) {
     // There is no descent direction.
     // TODO(patwie): Handle this case.
-    return -1;
+    return stpmin;
   }
 
   bool brackt = false;
@@ -435,8 +647,8 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
 template <typename Callable, typename scalar_t>
 [[nodiscard]] inline scalar_t line_at_alpha(
     Callable &f, std::vector<scalar_t> &linesearch_temp,
-    const std::vector<scalar_t> &x,
-    const std::vector<scalar_t> &search_direction, const scalar_t alpha) {
+    std::vector<scalar_t> &x, const std::vector<scalar_t> &search_direction,
+    const scalar_t alpha) {
   const size_t x_size = x.size();
   for (size_t i = 0; i < x_size; ++i) {
     linesearch_temp[i] = x[i] + alpha * search_direction[i];
@@ -445,8 +657,8 @@ template <typename Callable, typename scalar_t>
 }
 template <typename Callable, typename scalar_t = double>
 [[nodiscard]] [[maybe_unused]] scalar_t armijo_search(
-    Callable &f, const scalar_t current_f_val, const std::vector<scalar_t> &x,
-    const std::vector<scalar_t> &gradient,
+    Callable &f, const scalar_t current_f_val, std::vector<scalar_t> &x,
+    std::vector<scalar_t> &gradient,
     const std::vector<scalar_t> &search_direction, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
   scalar_t limit = 0.0;
@@ -469,8 +681,8 @@ template <typename Callable, typename scalar_t = double>
 // this is just an overload which allows us to pass a temporary
 template <typename Callable, typename scalar_t = double>
 [[maybe_unused]] scalar_t armijo_search(
-    Callable &f, const scalar_t current_f_val, const std::vector<scalar_t> &x,
-    const std::vector<scalar_t> &gradient,
+    Callable &f, const scalar_t current_f_val, std::vector<scalar_t> &x,
+    std::vector<scalar_t> &gradient,
     const std::vector<scalar_t> &search_direction,
     std::vector<scalar_t> &linesearch_temp, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
@@ -491,8 +703,7 @@ template <typename Callable, typename scalar_t = double>
 // this is just an overload which allows us to pass a temporary
 template <typename Callable, typename scalar_t = double>
 [[maybe_unused]] scalar_t armijo_search(
-    Callable &f, const std::vector<scalar_t> &x,
-    const std::vector<scalar_t> &gradient,
+    Callable &f, std::vector<scalar_t> &x, std::vector<scalar_t> &gradient,
     const std::vector<scalar_t> &search_direction,
     std::vector<scalar_t> &linesearch_temp, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
@@ -720,7 +931,7 @@ struct solver_status {
 };
 
 template <typename Callable, typename scalar_t = double>
-class NelderMeadSolver {
+class NelderMead {
  private:
   Callable &f;
   const scalar_t step, alpha, gamma, rho, sigma;
@@ -730,7 +941,7 @@ class NelderMeadSolver {
 
  public:
   // constructor
-  explicit NelderMeadSolver<Callable, scalar_t>(
+  explicit NelderMead<Callable, scalar_t>(
       Callable &f, const scalar_t step = -1, const scalar_t alpha = 1,
       const scalar_t gamma = 2, const scalar_t rho = 0.5,
       const scalar_t sigma = 0.5, const scalar_t eps = 10e-4,
@@ -996,7 +1207,7 @@ enum RecombinationStrategy { best, random };
 
 template <typename Callable, typename RNG, typename scalar_t = double,
           RecombinationStrategy RecombinationType = random>
-class DESolver {
+class DE {
  private:
   Callable &f;
   RNG &generator;
@@ -1005,7 +1216,7 @@ class DESolver {
 
  public:
   // constructor
-  DESolver<Callable, RNG, scalar_t, RecombinationType>(
+  DE<Callable, RNG, scalar_t, RecombinationType>(
       Callable &f, RNG &generator, const scalar_t crossover_prob = 0.9,
       const scalar_t differential_weight = 0.8, const scalar_t eps = 10e-4,
       const size_t pop_size = 50, const size_t max_iter = 1000,
@@ -1108,7 +1319,7 @@ enum PSOType { Vanilla, Accelerated };
 
 template <typename Callable, typename RNG, typename scalar_t = double,
           PSOType Type = Vanilla>
-class PSOSolver {
+class PSO {
  private:
   // user supplied
   RNG &generator;
@@ -1130,7 +1341,7 @@ class PSOSolver {
   const scalar_t eps;
 
  public:
-  explicit PSOSolver<Callable, RNG, scalar_t, Type>(
+  explicit PSO<Callable, RNG, scalar_t, Type>(
       Callable &f, RNG &generator, const scalar_t inertia = 0.8,
       const scalar_t cognitive_coef = 1.8, const scalar_t social_coef = 1.8,
       const size_t n_particles = 10, const size_t max_iter = 5000,
@@ -1357,7 +1568,7 @@ class PSOSolver {
 };
 
 template <typename Callable, typename RNG, typename scalar_t = double>
-class SANNSolver {
+class SANN {
  private:
   // user supplied
   RNG &generator;
@@ -1369,10 +1580,10 @@ class SANNSolver {
   const scalar_t temperature_max;
 
  public:
-  SANNSolver<Callable, RNG, scalar_t>(Callable &f, RNG &generator,
-                                      const size_t max_iter = 5000,
-                                      const size_t temperature_iter = 10,
-                                      const scalar_t temperature_max = 10.0)
+  SANN<Callable, RNG, scalar_t>(Callable &f, RNG &generator,
+                                const size_t max_iter = 5000,
+                                const size_t temperature_iter = 10,
+                                const scalar_t temperature_max = 10.0)
       : generator(generator),
         f(f),
         f_evals(0),
@@ -1928,11 +2139,12 @@ class GradientDescent {
   std::vector<scalar_t> search_direction, linesearch_temp;
 
  public:
-  explicit GradientDescent<Callable, scalar_t, scalar_t, GradientStepType,
-                           size_t, bool, Grad, bool>(
-      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
-      const size_t max_iter = 500, const scalar_t grad_eps = 1e-12,
-      const scalar_t alpha = 0.03)
+  explicit GradientDescent<Callable, scalar_t, GradientStepType, size_t, bool,
+                           Grad, bool>(Callable &f,
+                                       Grad g = fin_diff<Callable, scalar_t>(),
+                                       const size_t max_iter = 500,
+                                       const scalar_t grad_eps = 1e-12,
+                                       const scalar_t alpha = 0.03)
       : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
   // minimize interface
   solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
@@ -1982,7 +2194,7 @@ class GradientDescent {
         for (size_t i = 0; i < n_dim; i++) {
           this->search_direction[i] = f_multiplier * gradient[i];
         }
-        alpha_ = nlsolver::linesearch::more_thuente_search(
+        alpha_ = nlsolver::linesearch::armijo_search(
             f_lam, x, gradient, this->search_direction, this->linesearch_temp,
             this->alpha);
       }
@@ -2011,6 +2223,101 @@ class GradientDescent {
       // update parameters
       for (size_t i = 0; i < n_dim; i++) {
         x[i] += f_multiplier * alpha_ * gradient[i];
+      }
+      iter++;
+    }
+  }
+};
+
+template <typename Callable, typename scalar_t,
+          typename Grad = fin_diff<Callable, scalar_t>>
+class ConjugatedGradientDescent {
+  Callable &f;
+  Grad g;
+  const size_t max_iter;
+  const scalar_t grad_eps, alpha;
+  std::vector<scalar_t> search_direction, linesearch_temp;
+
+ public:
+  explicit ConjugatedGradientDescent<Callable, scalar_t, Grad>(
+      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
+      const size_t max_iter = 500, const scalar_t grad_eps = 1e-12,
+      const scalar_t alpha = 0.03)
+      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
+  // minimize interface
+  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize interface
+  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
+    // we need additional temporaries for linesearch
+    this->search_direction = std::vector<scalar_t>(n_dim, 0.0);
+    this->linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
+    scalar_t alpha_ = this->alpha;
+    size_t iter = 0, function_calls_used = 0;
+    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    scalar_t max_grad_norm = 0;
+    // construct lambda that takes f and enables function evaluation counting
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    g(this->f, x, gradient);
+    if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+      // if we are using the preset, we know how many function evaluations are
+      // necessary
+      function_calls_used += 6 * n_dim;
+    }
+    // set search direction for linesearch
+    for (size_t i = 0; i < n_dim; i++) {
+      this->search_direction[i] = f_multiplier * gradient[i];
+    }
+    while (true) {
+      // compute gradient
+      const scalar_t grad_norm = norm(gradient);
+      if (iter >= this->max_iter || grad_norm < grad_eps ||
+          std::isinf(grad_norm)) {
+        // evaluate at current parameters
+        scalar_t current_val = f_lam(x);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used);
+      }
+      alpha_ = nlsolver::linesearch::armijo_search(
+          f_lam, x, gradient, this->search_direction, this->linesearch_temp,
+          this->alpha);
+      // update parameters
+      for (size_t i = 0; i < n_dim; i++) {
+        x[i] += alpha_ * this->search_direction[i];
+      }
+      // recompute gradient, compute new search direction using conjugation
+      // first, compute gradient.dot(gradient) with existing gradient,
+      // then compute new gradient and compute the same, then compute their
+      // ratio
+      scalar_t denominator = 0;
+      for (auto &val : gradient) denominator += std::pow(val, 2);
+      // recompute gradient
+      g(this->f, x, gradient);
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        // if we are using the preset, we know how many function evaluations are
+        // necessary
+        function_calls_used += 6 * n_dim;
+      }
+      // figure out the numerator from new gradient
+      scalar_t numerator = 0;
+      for (auto &val : gradient) numerator += std::pow(val, 2);
+      const scalar_t search_update = numerator / denominator;
+      // update search direction
+      for (size_t i = 0; i < n_dim; ++i) {
+        this->search_direction[i] *= search_update;
+        // effectively beta * search_direction - gradient
+        this->search_direction[i] += f_multiplier * gradient[i];
       }
       iter++;
     }
@@ -2084,67 +2391,6 @@ class BFGS {
       iter++;
     }
   }
-  [[nodiscard]] bool check(const size_t iter, const scalar_t val,
-                           const size_t max_iter) {
-    // template <class vector_t, class hessian_t>
-    // void Update(const function::State<scalar_t,
-    //             vector_t, hessian_t> previous_function_state,
-    //             const function::State<scalar_t,
-    //             vector_t, hessian_t> current_function_state,
-    //             const State &stop_state) {
-    if (std::isnan(val)) {
-      std::cout << "Nan loss at iteration: " << iter << std::endl;
-      return false;
-    }
-    if (iter >= max_iter) {
-      std::cout << "Iteration limit reached." << std::endl;
-      return false;
-    }
-    //   f_delta =
-    //     fabs(current_function_state.value - previous_function_state.value);
-    //   x_delta = (current_function_state.x - previous_function_state.x)
-    //                                    .template lpNorm<Eigen::Infinity>();
-    //   gradient_norm =
-    //   current_function_state.gradient.template lpNorm<Eigen::Infinity>();
-    //   if ((stop_state.num_iterations > 0) &&
-    //       (num_iterations > stop_state.num_iterations)) {
-    //     status = Status::IterationLimit;
-    //     return;
-    //   }
-    //   if ((stop_state.x_delta > 0) && (x_delta < stop_state.x_delta)) {
-    //     x_delta_violations++;
-    //     if (x_delta_violations >= stop_state.x_delta_violations) {
-    //       status = Status::XDeltaViolation;
-    //       return;
-    //     }
-    //   } else {
-    //     x_delta_violations = 0;
-    //   }
-    //   if ((stop_state.f_delta > 0) && (f_delta < stop_state.f_delta)) {
-    //     f_delta_violations++;
-    //     if (f_delta_violations >= stop_state.f_delta_violations) {
-    //       status = Status::FDeltaViolation;
-    //       return;
-    //     }
-    //   } else {
-    //     f_delta_violations = 0;
-    //   }
-    //   if ((stop_state.gradient_norm > 0) &&
-    //       (gradient_norm < stop_state.gradient_norm)) {
-    //     status = Status::GradientNormViolation;
-    //     return;
-    //   }
-    //   if (previous_function_state.order == 2) {
-    //     if ((stop_state.condition_hessian > 0) &&
-    //         (condition_hessian > stop_state.condition_hessian)) {
-    //       status = Status::HessianConditionViolation;
-    //       return;
-    //     }
-    //   }
-    //   status = Status::Continue;
-    // }
-    return true;
-  }
   scalar_t step(std::vector<scalar_t> &x) {
     // update search direction vector using -inverse_hessian * gradient
     for (size_t j = 0; j < this->dim; j++) {
@@ -2168,7 +2414,7 @@ class BFGS {
         this->search_direction[i] = -this->gradient[i];
       }
     }
-    const scalar_t rate = nlsolver::linesearch::more_thuente_search(
+    const scalar_t rate = nlsolver::linesearch::armijo_search(
         this->f, this->current_val, x, this->gradient, this->search_direction,
         this->linesearch_temp);
     // const scalar_t rate = linesearch::MoreThuente<function_t, 1>::Search(
