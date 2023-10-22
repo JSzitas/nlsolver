@@ -38,6 +38,25 @@
 #include <utility>
 #include <vector>
 
+// TODO(JSzitas): clean up
+template <typename scalar_t>
+[[maybe_unused]] void display_square_mat(const std::vector<scalar_t> &x) {
+  const size_t n_dim = std::sqrt(x.size());
+  for (size_t i = 0; i < n_dim; i++) {
+    for (size_t j = 0; j < n_dim; j++) {
+      std::cout << x[i + j * n_dim] << ",";
+    }
+    std::cout << std::endl;
+  }
+}
+template <typename T, const bool use_newline = true>
+void display_vector(const T &x) {
+  for (size_t i = 0; i < x.size(); i++) {
+    std::cout << x[i] << ",";
+  }
+  if constexpr (use_newline) std::cout << std::endl;
+}
+
 // mostly dot products and other fun stuff
 namespace nlsolver::math {
 template <typename T>
@@ -52,7 +71,7 @@ inline T dot(const T *x, const T *y, int f) {
 }
 
 template <typename T>
-inline T fast_sum(const T *x, int size) {
+[[maybe_unused]] inline T fast_sum(const T *x, int size) {
   T result = 0;
   for (int i = 0; i < size; i++) {
     result += (*x);
@@ -62,7 +81,8 @@ inline T fast_sum(const T *x, int size) {
 }
 
 template <typename T>
-inline T vec_scalar_mult(const T *vec, const T *scalar, int f) {
+[[maybe_unused]] inline T vec_scalar_mult(const T *vec, const T *scalar,
+                                          int f) {
   T result = 0;
   // load single scalar
   // Don't forget the remaining values.
@@ -72,183 +92,218 @@ inline T vec_scalar_mult(const T *vec, const T *scalar, int f) {
   }
   return result;
 }
-
-// inspired by annoylib, see
-// https://github.com/spotify/annoy/blob/main/src/annoylib.h
-#if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
-    (__GNUC__ > 6) && defined(__AVX512F__)
-#define DOT_USE_AVX512
-#endif
-#if !defined(NO_MANUAL_VECTORIZATION) && defined(__AVX__) && \
-    defined(__SSE__) && defined(__SSE2__) && defined(__SSE3__)
-#define DOT_USE_AVX
-#endif
-
-#if defined(DOT_USE_AVX) || defined(DOT_USE_AVX512)
-#if defined(_MSC_VER)
-#include <intrin.h>
-#elif defined(__GNUC__)
-#include <x86intrin.h>
-#endif
-#endif
-
-#ifdef DOT_USE_AVX
-// Horizontal single sum of 256bit vector.
-inline float hsum256_ps_avx(__m256 v) {
-  const __m128 x128 =
-      _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
-  const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
-  const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
-  return _mm_cvtss_f32(x32);
-}
-
-inline double hsum256_pd_avx(__m256d v) {
-  __m128d vlow = _mm256_castpd256_pd128(v);
-  __m128d vhigh = _mm256_extractf128_pd(v, 1);  // high 128
-  vlow = _mm_add_pd(vlow, vhigh);               // reduce down to 128
-  __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
-  return _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
-}
-
-// overload
-template <>
-inline float dot<float>(const float *x, const float *y, int f) {
-  float result = 0;
-  if (f > 7) {
-    __m256 d = _mm256_setzero_ps();
-    for (; f > 7; f -= 8) {
-      d = _mm256_add_ps(d,
-                        _mm256_mul_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y)));
-      x += 8;
-      y += 8;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_ps_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; f > 0; f--) {
-    result += *x * *y;
-    x++;
-    y++;
-  }
-  return result;
-}
-
-// second overload
-template <>
-inline double dot<double>(const double *x, const double *y, int f) {
-  double result = 0;
-  if (f > 3) {
-    __m256d d = _mm256_setzero_pd();
-    for (; f > 3; f -= 4) {
-      d = _mm256_add_pd(d,
-                        _mm256_mul_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(y)));
-      x += 4;
-      y += 4;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_pd_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; f > 0; f--) {
-    result += *x * *y;
-    x++;
-    y++;
-  }
-  return result;
-}
-
-template <>
-inline float fast_sum<float>(const float *x, int size) {
-  float result = 0;
-  if (size > 7) {
-    __m256 d = _mm256_setzero_ps();
-    for (; size > 7; size -= 8) {
-      d = _mm256_add_ps(d, _mm256_loadu_ps(x));
-      x += 8;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_ps_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; size > 0; size--) {
-    result += *x;
-    x++;
-  }
-  return result;
-}
-
-template <>
-inline double fast_sum<double>(const double *x, int size) {
-  double result = 0;
-  if (size > 3) {
-    __m256d d = _mm256_setzero_pd();
-    for (; size > 3; size -= 4) {
-      d = _mm256_add_pd(d, _mm256_loadu_pd(x));
-      x += 4;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_pd_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; size > 0; size--) {
-    result += *x;
-    x++;
-  }
-  return result;
-}
-
-// multiply a vector by scalar
-template <>
-inline float vec_scalar_mult<float>(const float *vec, const float *scalar,
-                                    int f) {
-  float result = 0;
-  // load single scalar
-  const __m256 s = _mm256_set1_ps(*scalar);
-  if (f > 7) {
-    __m256 d = _mm256_setzero_ps();
-    for (; f > 7; f -= 8) {
-      d = _mm256_add_ps(d, _mm256_mul_ps(_mm256_loadu_ps(vec), s));
-      vec += 8;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_ps_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; f > 0; f--) {
-    result += *vec * *scalar;
-    vec++;
-  }
-  return result;
-}
-
-// overload for doubles
-template <>
-inline double vec_scalar_mult<double>(const double *vec, const double *scalar,
-                                      int f) {
-  double result = 0;
-  // load single scalar
-  const __m256d s = _mm256_set1_pd(*scalar);
-  if (f > 3) {
-    __m256d d = _mm256_setzero_pd();
-    for (; f > 3; f -= 4) {
-      d = _mm256_add_pd(d, _mm256_mul_pd(_mm256_loadu_pd(vec), s));
-      vec += 8;
-    }
-    // Sum all floats in dot register.
-    result += hsum256_pd_avx(d);
-  }
-  // Don't forget the remaining values.
-  for (; f > 0; f--) {
-    result += *vec * *scalar;
-    vec++;
-  }
-  return result;
-}
-
-#endif
-
 }  // namespace nlsolver::math
+
+namespace nlsolver::rng {
+
+#include <cstdint>
+#define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
+
+template <typename scalar_t = float>
+struct [[maybe_unused]] halton {
+  explicit halton<scalar_t>(const scalar_t base = 2)
+      : b(base), y(1), n(0), d(1), x(1) {}
+  scalar_t yield() {
+    x = d - n;
+    if (x == 1) {
+      n = 1;
+      d *= b;
+    } else {
+      y = d;
+      while (x <= y) {
+        y /= b;
+        n = (b + 1) * y - x;
+      }
+    }
+    return (scalar_t)(n / d);
+  }
+  scalar_t operator()() { return this->yield(); }
+  [[maybe_unused]] void reset() {
+    b = 2;
+    y = 1;
+    n = 0;
+    d = 1;
+    x = 1;
+  }
+  [[maybe_unused]] std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(5);
+    result[0] = b;
+    result[1] = y;
+    result[2] = n;
+    result[3] = d;
+    result[4] = x;
+    return result;
+  }
+  [[maybe_unused]] void set_state(const scalar_t b_, const scalar_t y_,
+                                  const scalar_t n_, const scalar_t d_,
+                                  const scalar_t x_) {
+    this->b = b_;
+    this->y = y_;
+    this->n = n_;
+    this->d = d_;
+    this->x = x_;
+  }
+
+ private:
+  scalar_t b, y, n, d, x;
+};
+
+template <typename scalar_t = float>
+struct [[maybe_unused]] recurrent {
+  recurrent<scalar_t>() : seed_(0.5), alpha_(0.618034), z_(alpha_ + seed_) {
+    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
+  }
+  [[maybe_unused]] explicit recurrent(scalar_t seed)
+      : seed_(seed), alpha_(0.618034), z_(alpha_ + seed_) {
+    this->z_ -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
+  }
+  scalar_t yield() {
+    this->z_ += this->alpha_;
+    // a slightly evil way to do z % 1 with floats
+    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
+    return this->z_;
+  }
+  scalar_t operator()() { return this->yield(); }
+  [[maybe_unused]] void reset() {
+    this->alpha_ = 0.618034;
+    this->seed_ = 0.5;
+    this->z_ = 0;
+  }
+  [[maybe_unused]] std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(2);
+    result[0] = this->alpha_;
+    result[1] = this->z_;
+    return result;
+  }
+  [[maybe_unused]] void set_state(scalar_t alpha = 0.618034, scalar_t z = 0) {
+    this->alpha_ = alpha;
+    this->z_ = z;
+  }
+
+ private:
+  scalar_t alpha_ = 0.618034, seed_ = 0.5, z_ = 0;
+};
+
+template <typename scalar_t = float>
+struct splitmix {
+  explicit splitmix<scalar_t>() : s(12374563468) {}
+  scalar_t yield() {
+    uint64_t result = (s += 0x9E3779B97f4A7C15);
+    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return (scalar_t)(result ^ (result >> 31)) / (scalar_t)MAX_SIZE_64_BIT_UINT;
+  }
+  scalar_t operator()() { return this->yield(); }
+  uint64_t yield_init() {
+    uint64_t result = (s += 0x9E3779B97f4A7C15);
+    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return result ^ (result >> 31);
+  }
+  [[maybe_unused]] void set_state(uint64_t seed) { this->s = seed; }
+  [[maybe_unused]] std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(1);
+    result[0] = this->s;
+    return result;
+  }
+
+ private:
+  uint64_t s;
+};
+template <typename scalar_t = float>
+struct xoshiro {
+  xoshiro<scalar_t>() {  // NOLINT
+    splitmix<scalar_t> gn;
+    s[0] = gn.yield_init();
+    s[1] = s[0] >> 32;
+    s[2] = gn.yield();
+    s[3] = s[2] >> 32;
+  }
+  scalar_t yield() {
+    uint64_t const result = s[0] + s[3];
+    uint64_t const t = s[1] << 17;
+
+    s[2] ^= s[0];
+    s[3] ^= s[1];
+    s[1] ^= s[2];
+    s[0] ^= s[3];
+
+    s[2] ^= t;
+    s[3] = bitwise_rotate(s[3], 64, 45);
+
+    return (scalar_t)result / (scalar_t)MAX_SIZE_64_BIT_UINT;
+  }
+  uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
+    return (x << rotate_bits) | (x >> (bits - rotate_bits));
+  }
+  scalar_t operator()() { return this->yield(); }
+  void reset() {
+    splitmix<scalar_t> gn;
+    s[0] = gn.yield_init();
+    s[1] = s[0] >> 32;
+
+    s[2] = gn.yield();
+    s[3] = s[2] >> 32;
+  }
+  [[maybe_unused]] void set_state(uint64_t x, uint64_t y, uint64_t z,
+                                  uint64_t t) {
+    this->s[0] = x;
+    this->s[1] = y;
+    this->s[2] = z;
+    this->s[3] = t;
+  }
+  [[maybe_unused]] std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(4);
+    for (size_t i = 0; i < 4; i++) {
+      result[i] = this->s[i];
+    }
+    return result;
+  }
+
+ private:
+  uint64_t s[4];
+};
+
+template <typename scalar_t = float>
+struct xorshift {
+  xorshift<scalar_t>() {  // NOLINT
+    splitmix<scalar_t> gn;
+    x[0] = gn.yield_init();
+    x[1] = x[0] >> 32;
+  }
+  scalar_t yield() {
+    uint64_t t = x[0];
+    uint64_t const s = x[1];
+    x[0] = s;
+    t ^= t << 23;  // a
+    t ^= t >> 18;  // b -- Again, the shifts and the multipliers are tunable
+    t ^= s ^ (s >> 5);  // c
+    x[1] = t;
+    return static_cast<scalar_t>((t + s) /
+                                 static_cast<scalar_t>(MAX_SIZE_64_BIT_UINT));
+  }
+  scalar_t operator()() { return this->yield(); }
+  [[maybe_unused]] void reset() {
+    splitmix<scalar_t> gn;
+    x[0] = gn.yield_init();
+    x[1] = x[0] >> 32;
+  }
+  [[maybe_unused]] void set_state(uint64_t y, uint64_t z) {
+    x[0] = y;
+    x[1] = z;
+  }
+  [[maybe_unused]] std::vector<scalar_t> get_state() const {
+    std::vector<scalar_t> result(2);
+    for (size_t i = 0; i < 2; i++) {
+      result[i] = this->x[i];
+    }
+    return result;
+  }
+
+ private:
+  uint64_t x[2]{};
+};
+}  // namespace nlsolver::rng
 
 namespace nlsolver::finite_difference {
 // The 'accuracy' can be 0, 1, 2, 3.
@@ -394,21 +449,30 @@ scalar_t max_abs(scalar_t x, scalar_t y, scalar_t z) {
 // and everything is done by reference - potentially might also
 // benefit from branch elimination
 template <typename scalar_t>
-static int cstep(scalar_t &stx, scalar_t &fx, scalar_t &dx,     // NOLINT
-                 scalar_t &sty,                                 // NOLINT
-                 scalar_t &fy, scalar_t &dy, scalar_t &stp,     // NOLINT
-                 scalar_t &fp,                                  // NOLINT
-                 scalar_t &dp, bool &brackt, scalar_t &stpmin,  // NOLINT
-                 scalar_t &stpmax, int &info) {                 // NOLINT
+[[maybe_unused]] static int cstep(scalar_t &stx, scalar_t &fx,
+                                  scalar_t &dx,   // NOLINT
+                                  scalar_t &sty,  // NOLINT
+                                  scalar_t &fy, scalar_t &dy,
+                                  scalar_t &stp,  // NOLINT
+                                  scalar_t &fp,   // NOLINT
+                                  scalar_t &dp, bool &brackt,
+                                  scalar_t &stpmin,               // NOLINT
+                                  scalar_t &stpmax, int &info) {  // NOLINT
   info = 0;
   bool bound = false;
+
   // Check the input parameters for errors.
-  if ((brackt & ((stp <= std::min<scalar_t>(stx, sty)) ||
-                 (stp >= std::max<scalar_t>(stx, sty)))) ||
-      (dx * (stp - stx) >= 0.0) || (stpmax < stpmin)) {
+  if ((brackt & ((stp <= std::min<scalar_t>(stx, sty)) |
+                 (stp >= std::max<scalar_t>(stx, sty)))) |
+      (dx * (stp - stx) >= 0.0) | (stpmax < stpmin)) {
     return -1;
   }
-  scalar_t sgnd = dp * (dx / fabs(dx)), stpf = 0, stpc = 0, stpq = 0;
+
+  scalar_t sgnd = dp * (dx / fabs(dx));
+  scalar_t stpf = 0;
+  scalar_t stpc = 0;
+  scalar_t stpq = 0;
+
   if (fp > fx) {
     info = 1;
     bound = true;
@@ -498,6 +562,7 @@ static int cstep(scalar_t &stx, scalar_t &fx, scalar_t &dx,     // NOLINT
       stpf = stpmin;
     }
   }
+
   if (fp > fx) {
     sty = stp;
     fy = fp;
@@ -508,12 +573,15 @@ static int cstep(scalar_t &stx, scalar_t &fx, scalar_t &dx,     // NOLINT
       fy = fx;
       dy = dx;
     }
+
     stx = stp;
     fx = fp;
     dx = dp;
   }
+
   stpf = std::clamp(stpf, stpmin, stpmax);
   stp = stpf;
+
   if (brackt & bound) {
     if (sty > stx) {
       stp = std::min<scalar_t>(stx + static_cast<scalar_t>(0.66) * (sty - stx),
@@ -525,26 +593,29 @@ static int cstep(scalar_t &stx, scalar_t &fx, scalar_t &dx,     // NOLINT
   }
   return 0;
 }
-template <typename Callable, typename scalar_t = double>
-scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
-                std::vector<scalar_t> &gradient, scalar_t stp,
-                const std::vector<scalar_t> &search_direction,
-                std::vector<scalar_t> &linesearch_temp) {
-  constexpr scalar_t xtol = 1e-15, ftol = 1e-4, gtol = 1e-2, stpmin = 1e-15,
-                     stpmax = 1e15, xtrapf = 4;
+
+template <typename Callable, typename Grad, typename scalar_t = double>
+[[maybe_unused]] static int cvsrch(
+    Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
+    std::vector<scalar_t> &gradient, scalar_t *stp,
+    const std::vector<scalar_t> &search_direction,
+    std::vector<scalar_t> &linesearch_temp, Grad &g) {
+  // we rewrite this from MIN-LAPACK and some MATLAB code
+  int info = 0;
+  int infoc = 1;
+  constexpr scalar_t xtol = 1e-15;
+  constexpr scalar_t ftol = 1e-4;
+  constexpr scalar_t gtol = 1e-2;
+  constexpr scalar_t stpmin = 1e-15;
+  constexpr scalar_t stpmax = 1e15;
+  constexpr scalar_t xtrapf = 4;
   constexpr int maxfev = 20;
-  int nfev = 0, info = 0, infoc = 1;
+  int nfev = 0;
 
-  scalar_t dginit = 0.0;
-  const size_t g_size = gradient.size();
-  for (size_t i = 0; i < g_size; i++) {
-    dginit += gradient[i] * search_direction[i];
-  }
-
+  scalar_t dginit =
+      nlsolver::math::dot(gradient.data(), search_direction.data(), x.size());
   if (dginit >= 0.0) {
-    // There is no descent direction.
-    // TODO(patwie): Handle this case.
-    return stpmin;
+    return -1;
   }
 
   bool brackt = false;
@@ -554,8 +625,8 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
   scalar_t dgtest = ftol * dginit;
   scalar_t width = stpmax - stpmin;
   scalar_t width1 = 2 * width;
+  // vector_t wa = x->eval();
 
-  const size_t x_size = x.size();
   scalar_t stx = 0.0;
   scalar_t fx = finit;
   scalar_t dgx = dginit;
@@ -565,6 +636,7 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
 
   scalar_t stmin;
   scalar_t stmax;
+
   while (true) {
     // Make sure we stay in the interval when setting min/max-step-width.
     if (brackt) {
@@ -572,57 +644,55 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
       stmax = std::max<scalar_t>(stx, sty);
     } else {
       stmin = stx;
-      stmax = stp + xtrapf * (stp - stx);
+      stmax = *stp + xtrapf * (*stp - stx);
     }
+
     // Force the step to be within the bounds stpmax and stpmin.
-    stp = std::clamp(stp, stpmin, stpmax);
-    // Return the last reliable values.
-    if ((brackt && ((stp <= stmin) || (stp >= stmax))) ||
+    *stp = std::clamp(*stp, stpmin, stpmax);
+
+    // Oops, let us return the last reliable values.
+    if ((brackt && ((*stp <= stmin) || (*stp >= stmax))) ||
         (nfev >= maxfev - 1) || (infoc == 0) ||
         (brackt && ((stmax - stmin) <= (xtol * stmax)))) {
-      stp = stx;
+      *stp = stx;
     }
+
     // Test new point.
-    for (size_t i = 0; i < x_size; i++) {
-      linesearch_temp[i] = x[i] + stp * search_direction[i];
+    for (size_t i = 0; i < x.size(); i++) {
+      linesearch_temp[i] = x[i] + *stp * search_direction[i];
     }
     current_f_value = f(linesearch_temp);
-    // compute current gradient - there should be an overload for cases where
-    // there is a method for computing the gradient, but for now just rely on
-    // finite differences
-    nlsolver::finite_difference::finite_difference_gradient(f, linesearch_temp,
-                                                            gradient);
+    g(linesearch_temp, gradient);
     nfev++;
-    scalar_t dg = 0.0;
-    for (size_t i = 0; i < g_size; i++) {
-      dg += gradient[i] * search_direction[i];
-    }
-    scalar_t ftest1 = finit + stp * dgtest;
+    scalar_t dg =
+        nlsolver::math::dot(gradient.data(), search_direction.data(), x.size());
+    scalar_t ftest1 = finit + *stp * dgtest;
+
     // All possible convergence tests.
-    if ((brackt & ((stp <= stmin) || (stp >= stmax))) || (infoc == 0)) info = 6;
-    if ((stp == stpmax) & (current_f_value <= ftest1) & (dg <= dgtest))
+    if ((brackt & ((*stp <= stmin) | (*stp >= stmax))) | (infoc == 0)) info = 6;
+    if ((*stp == stpmax) & (current_f_value <= ftest1) & (dg <= dgtest))
       info = 5;
-    if ((stp == stpmin) & ((current_f_value > ftest1) || (dg >= dgtest)))
+    if ((*stp == stpmin) & ((current_f_value > ftest1) | (dg >= dgtest)))
       info = 4;
     if (nfev >= maxfev) info = 3;
     if (brackt & (stmax - stmin <= xtol * stmax)) info = 2;
     if ((current_f_value <= ftest1) & (fabs(dg) <= gtol * (-dginit))) info = 1;
     // Terminate when convergence reached.
-    if (info != 0) return stp;
+    if (info != 0) return -1;
 
     if (stage1 & (current_f_value <= ftest1) &
         (dg >= std::min<scalar_t>(ftol, gtol) * dginit))
       stage1 = false;
 
     if (stage1 & (current_f_value <= fx) & (current_f_value > ftest1)) {
-      scalar_t fm = current_f_value - stp * dgtest;
+      scalar_t fm = current_f_value - *stp * dgtest;
       scalar_t fxm = fx - stx * dgtest;
       scalar_t fym = fy - sty * dgtest;
       scalar_t dgm = dg - dgtest;
       scalar_t dgxm = dgx - dgtest;
       scalar_t dgym = dgy - dgtest;
 
-      cstep(stx, fxm, dgxm, sty, fym, dgym, stp, fm, dgm, brackt, stmin, stmax,
+      cstep(stx, fxm, dgxm, sty, fym, dgym, *stp, fm, dgm, brackt, stmin, stmax,
             infoc);
 
       fx = fxm + stx * dgtest;
@@ -631,24 +701,25 @@ scalar_t cvsrch(Callable &f, std::vector<scalar_t> &x, scalar_t current_f_value,
       dgy = dgym + dgtest;
     } else {
       // This is ugly and some variables should be moved to the class scope.
-      cstep(stx, fx, dgx, sty, fy, dgy, stp, current_f_value, dg, brackt, stmin,
-            stmax, infoc);
+      cstep(stx, fx, dgx, sty, fy, dgy, *stp, current_f_value, dg, brackt,
+            stmin, stmax, infoc);
     }
+
     if (brackt) {
       if (fabs(sty - stx) >= 0.66 * width1) {
-        stp = stx + 0.5 * (sty - stx);
+        *stp = stx + 0.5 * (sty - stx);
       }
       width1 = width;
       width = fabs(sty - stx);
     }
   }
-  return stp;
+  return 0;
 }
 template <typename Callable, typename scalar_t>
 [[nodiscard]] inline scalar_t line_at_alpha(
     Callable &f, std::vector<scalar_t> &linesearch_temp,
     std::vector<scalar_t> &x, const std::vector<scalar_t> &search_direction,
-    const scalar_t alpha) {
+    const scalar_t alpha = 1.0) {
   const size_t x_size = x.size();
   for (size_t i = 0; i < x_size; ++i) {
     linesearch_temp[i] = x[i] + alpha * search_direction[i];
@@ -724,26 +795,29 @@ template <typename Callable, typename scalar_t = double>
 }
 
 //
-template <typename Callable, typename scalar_t = double>
+template <typename Callable, typename Grad, typename scalar_t = double>
 scalar_t more_thuente_search(Callable &f, const scalar_t current_f_val,
                              std::vector<scalar_t> &x,
                              std::vector<scalar_t> &gradient,
                              const std::vector<scalar_t> &search_direction,
                              std::vector<scalar_t> &linesearch_temp,
-                             scalar_t alpha = 1.0) {
-  return cvsrch(f, x, current_f_val, gradient, alpha, search_direction,
-                linesearch_temp);
+                             scalar_t alpha, Grad g) {
+  scalar_t alpha_ = alpha;
+  cvsrch(f, x, current_f_val, gradient, &alpha_, search_direction,
+         linesearch_temp, g);
+  return alpha_;
 }
 //
-template <typename Callable, typename scalar_t = double>
-scalar_t more_thuente_search(Callable &f, std::vector<scalar_t> &x,
-                             std::vector<scalar_t> &gradient,
-                             const std::vector<scalar_t> &search_direction,
-                             std::vector<scalar_t> &linesearch_temp,
-                             scalar_t alpha = 1.0) {
+template <typename Callable, typename Grad, typename scalar_t = double>
+[[maybe_unused]] scalar_t more_thuente_search(
+    Callable &f, std::vector<scalar_t> &x, std::vector<scalar_t> &gradient,
+    const std::vector<scalar_t> &search_direction,
+    std::vector<scalar_t> &linesearch_temp, scalar_t alpha, Grad g) {
   const scalar_t current_f_val = f(x);
-  return cvsrch(f, x, current_f_val, gradient, alpha, search_direction,
-                linesearch_temp);
+  scalar_t alpha_ = alpha;
+  cvsrch(f, x, current_f_val, gradient, &alpha_, search_direction,
+         linesearch_temp, g);
+  return alpha_;
 }
 };  // namespace nlsolver::linesearch
 
@@ -903,31 +977,38 @@ static inline scalar_t std_err(const std::vector<scalar_t> &x) {
 template <typename scalar_t = double>
 struct solver_status {
   solver_status<scalar_t>(const scalar_t f_val, const size_t iter_used,
-                          const size_t f_calls_used)
+                          const size_t f_calls_used,
+                          const size_t grad_evals_used = 0)
       : function_value(f_val),
         iteration(iter_used),
-        function_calls_used(f_calls_used) {}
+        function_calls_used(f_calls_used),
+        gradient_evals_used(grad_evals_used) {}
   void print() const {
     std::cout << "Function calls used: " << this->function_calls_used
               << std::endl;
     std::cout << "Algorithm iterations used: " << this->iteration << std::endl;
+    if (gradient_evals_used > 0) {
+      std::cout << "Gradient evaluations used: " << this->gradient_evals_used
+                << std::endl;
+    }
     std::cout << "With final function value of " << this->function_value
               << std::endl;
   }
-  std::tuple<size_t, size_t, scalar_t> get_summary() const {
+  std::tuple<size_t, size_t, scalar_t, size_t> get_summary() const {
     return std::make_tuple(this->function_calls_used, this->iteration,
-                           this->function_value);
+                           this->function_value, this->gradient_evals_used);
   }
   void add(const solver_status<scalar_t> &additional_runs) {
     auto other = additional_runs.get_summary();
     this->function_calls_used += std::get<0>(other);
     this->iteration += std::get<1>(other);
     this->function_value = std::get<2>(other);
+    this->gradient_evals_used += std::get<3>(other);
   }
 
  private:
   scalar_t function_value;
-  size_t iteration, function_calls_used;
+  size_t iteration, function_calls_used, gradient_evals_used;
 };
 
 template <typename Callable, typename scalar_t = double>
@@ -1230,11 +1311,11 @@ class DE {
         max_iter(max_iter),
         best_value_no_change(best_val_no_change) {}
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
   }
   // maximize interface
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     return this->solve<false>(x);
   }
 
@@ -1372,7 +1453,7 @@ class PSO {
         std::vector<std::vector<scalar_t>>(this->n_particles);
   }
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     std::vector<scalar_t> lower(x.size());
     std::vector<scalar_t> upper(x.size());
     scalar_t temp = 0;
@@ -1385,7 +1466,7 @@ class PSO {
     return this->solve<true, false>(x);
   }
   // maximize helper
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     std::vector<scalar_t> lower(x.size());
     std::vector<scalar_t> upper(x.size());
     scalar_t temp = 0;
@@ -1398,16 +1479,16 @@ class PSO {
     return this->solve<false, false>(x);
   }
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x,
-                                   const std::vector<scalar_t> &lower,
-                                   const std::vector<scalar_t> &upper) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
     return this->solve<true, true>(x);
   }
   // maximize helper
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x,
-                                   const std::vector<scalar_t> &lower,
-                                   const std::vector<scalar_t> &upper) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
     this->init_solver_state(lower, upper);
     return this->solve<false, true>(x);
   }
@@ -1591,11 +1672,11 @@ class SANN {
         temperature_iter(temperature_iter),
         temperature_max(temperature_max) {}
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
   }
   // maximize helper
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     return this->solve<false>(x);
   }
 
@@ -1680,7 +1761,7 @@ class NelderMeadPSO {
         max_iter(max_iter),
         no_change_best_iter(no_change_best_iter) {}
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
     // compute implied upper and lower bounds
     std::vector<scalar_t> lower(n_dim);
@@ -1694,7 +1775,7 @@ class NelderMeadPSO {
     return this->solve<true, false>(x, upper, lower);
   }
   // maximize interface
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
     // compute implied upper and lower bounds
     std::vector<scalar_t> lower(n_dim);
@@ -1708,15 +1789,15 @@ class NelderMeadPSO {
     return this->solve<false, false>(x, upper, lower);
   }
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x,
-                                   const std::vector<scalar_t> &lower,
-                                   const std::vector<scalar_t> &upper) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
     return this->solve<true, true>(x, upper, lower);
   }
   // maximize helper
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x,
-                                   const std::vector<scalar_t> &lower,
-                                   const std::vector<scalar_t> &upper) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
     return this->solve<false, true>(x, upper, lower);
   }
 
@@ -2057,7 +2138,8 @@ enum GradientStepType {
   Linesearch,
   Fixed,
   Bigstep,
-  Anneal
+  Anneal,
+  PAGE
   // Momentum
 };
 
@@ -2108,8 +2190,9 @@ template <typename Callable, typename scalar_t,
 class GradientDescent {
   Callable &f;
   Grad g;
-  const size_t max_iter;
+  const size_t max_iter, minibatch, minibatch_prime;
   const scalar_t grad_eps, alpha;
+  nlsolver::rng::xorshift<scalar_t> generator;
   constexpr static std::array<scalar_t, 248> fixed_steps = {
       2.9, 1.5,                                 // pattern length 2 => type 1
       1.5, 4.9,  1.5,                           // type 2
@@ -2135,21 +2218,29 @@ class GradientDescent {
       1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 12.6, 1.4,  2.0, 1.4, 3.9,   1.4,
       2.0, 1.4,  7.2,  1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4  // type 7
   };
-  std::vector<scalar_t> search_direction, linesearch_temp;
+  std::vector<scalar_t> search_direction, linesearch_temp, gradient_temp;
 
  public:
   explicit GradientDescent<Callable, scalar_t, step, bigstep_level,
                            grad_norm_lipschitz_scaling, Grad>(
-      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
-      const size_t max_iter = 500, const scalar_t grad_eps = 1e-12,
-      const scalar_t alpha = 0.03)
-      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
+      Callable &f, const scalar_t alpha = 1, const size_t max_iter = 500,
+      const scalar_t grad_eps = 1e-12, const size_t minibatch_b = 128,
+      const size_t minibatch_b_prime = 11,
+      Grad g = fin_diff<Callable, scalar_t>())
+      : f(f),
+        g(g),
+        max_iter(max_iter),
+        minibatch(minibatch_b),
+        minibatch_prime(minibatch_b_prime),
+        grad_eps(grad_eps),
+        alpha(alpha),
+        generator(nlsolver::rng::xorshift<scalar_t>()) {}
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
   }
   // maximize interface
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     return this->solve<false>(x);
   }
 
@@ -2157,44 +2248,63 @@ class GradientDescent {
   template <const bool minimize = true>
   solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
-    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
+    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0);
     if constexpr (step == GradientStepType::Linesearch) {
       // we need additional temporaries for linesearch
       this->search_direction = std::vector<scalar_t>(n_dim, 0.0);
       this->linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
+      this->gradient_temp = std::vector<scalar_t>(n_dim, 0.0);
     }
     scalar_t alpha_ = this->alpha;
-    size_t iter = 0, function_calls_used = 0;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
     constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
     scalar_t max_grad_norm = 0;
+    // only necessary and interesting for PAGE
+    const scalar_t p = minibatch / (minibatch_prime + minibatch);
+    const scalar_t ratio = static_cast<scalar_t>(minibatch) /
+                           static_cast<scalar_t>(minibatch_prime);
     // construct lambda that takes f and enables function evaluation counting
     auto f_lam = [&](decltype(x) &coef) {
       function_calls_used++;
       return this->f(coef);
     };
-    while (true) {
-      // compute gradient
-      g(this->f, x, gradient);
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
       if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-        // if we are using the preset, we know how many function evaluations are
-        // necessary
-        function_calls_used += 6 * n_dim;
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
       }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    // compute gradient
+    g_lam(x, gradient);
+    while (true) {
       const scalar_t grad_norm = norm(gradient);
       max_grad_norm = std::max(max_grad_norm, grad_norm);
       if (iter >= this->max_iter || grad_norm < grad_eps ||
           std::isinf(grad_norm)) {
         // evaluate at current parameters
         scalar_t current_val = f_lam(x);
-        return solver_status<scalar_t>(current_val, iter, function_calls_used);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
       }
       if constexpr (step == GradientStepType::Linesearch) {
         for (size_t i = 0; i < n_dim; i++) {
           this->search_direction[i] = f_multiplier * gradient[i];
+          this->gradient_temp[i] = gradient[i];
         }
-        alpha_ = nlsolver::linesearch::armijo_search(
-            f_lam, x, gradient, this->search_direction, this->linesearch_temp,
-            this->alpha);
+        alpha_ = nlsolver::linesearch::more_thuente_search(
+            f_lam, x, this->gradient_temp, this->search_direction,
+            this->linesearch_temp, this->alpha, g_lam);
       }
       // do nothing - this is here just to make it more obvious
       if constexpr (step == GradientStepType::Fixed) {
@@ -2222,6 +2332,20 @@ class GradientDescent {
       for (size_t i = 0; i < n_dim; i++) {
         x[i] += f_multiplier * alpha_ * gradient[i];
       }
+      if constexpr (step == GradientStepType::PAGE) {
+        for (size_t i = 0; i < n_dim; i++) prev_gradient[i] = gradient[i];
+      }
+      // compute gradient
+      g_lam(x, gradient);
+      if constexpr (step == GradientStepType::PAGE) {
+        if (generator() > p) {
+          // only do a small update where new gradient is old gradient
+          // + difference between gradients
+          for (size_t i = 0; i < n_dim; i++) {
+            gradient[i] += ratio * (gradient[i] - prev_gradient[i]);
+          }
+        }
+      }
       iter++;
     }
   }
@@ -2234,7 +2358,6 @@ class ConjugatedGradientDescent {
   Grad g;
   const size_t max_iter;
   const scalar_t grad_eps, alpha;
-  std::vector<scalar_t> search_direction, linesearch_temp;
 
  public:
   explicit ConjugatedGradientDescent<Callable, scalar_t, Grad>(
@@ -2243,11 +2366,11 @@ class ConjugatedGradientDescent {
       const scalar_t alpha = 0.03)
       : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
   // minimize interface
-  solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
   }
   // maximize interface
-  solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     return this->solve<false>(x);
   }
 
@@ -2257,26 +2380,36 @@ class ConjugatedGradientDescent {
     const size_t n_dim = x.size();
     std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
     // we need additional temporaries for linesearch
-    this->search_direction = std::vector<scalar_t>(n_dim, 0.0);
-    this->linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
+    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0);
+    std::vector<scalar_t> linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
     scalar_t alpha_ = this->alpha;
-    size_t iter = 0, function_calls_used = 0;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
     constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    scalar_t max_grad_norm = 0;
     // construct lambda that takes f and enables function evaluation counting
     auto f_lam = [&](decltype(x) &coef) {
       function_calls_used++;
       return this->f(coef);
     };
-    g(this->f, x, gradient);
-    if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-      // if we are using the preset, we know how many function evaluations are
-      // necessary
-      function_calls_used += 6 * n_dim;
-    }
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    g_lam(x, gradient);
     // set search direction for linesearch
     for (size_t i = 0; i < n_dim; i++) {
-      this->search_direction[i] = f_multiplier * gradient[i];
+      search_direction[i] = f_multiplier * gradient[i];
     }
     while (true) {
       // compute gradient
@@ -2285,14 +2418,14 @@ class ConjugatedGradientDescent {
           std::isinf(grad_norm)) {
         // evaluate at current parameters
         scalar_t current_val = f_lam(x);
-        return solver_status<scalar_t>(current_val, iter, function_calls_used);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
       }
       alpha_ = nlsolver::linesearch::armijo_search(
-          f_lam, x, gradient, this->search_direction, this->linesearch_temp,
-          this->alpha);
+          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
       // update parameters
       for (size_t i = 0; i < n_dim; i++) {
-        x[i] += alpha_ * this->search_direction[i];
+        x[i] += alpha_ * search_direction[i];
       }
       // recompute gradient, compute new search direction using conjugation
       // first, compute gradient.dot(gradient) with existing gradient,
@@ -2300,30 +2433,196 @@ class ConjugatedGradientDescent {
       // ratio
       scalar_t denominator = 0;
       for (auto &val : gradient) denominator += std::pow(val, 2);
-      // recompute gradient
-      g(this->f, x, gradient);
-      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-        // if we are using the preset, we know how many function evaluations are
-        // necessary
-        function_calls_used += 6 * n_dim;
-      }
+      g_lam(x, gradient);
       // figure out the numerator from new gradient
       scalar_t numerator = 0;
       for (auto &val : gradient) numerator += std::pow(val, 2);
       const scalar_t search_update = numerator / denominator;
       // update search direction
       for (size_t i = 0; i < n_dim; ++i) {
-        this->search_direction[i] *= search_update;
+        search_direction[i] *= search_update;
         // effectively beta * search_direction - gradient
-        this->search_direction[i] += f_multiplier * gradient[i];
+        search_direction[i] += f_multiplier * gradient[i];
       }
+      iter++;
+    }
+  }
+};
+template <typename scalar_t>
+void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
+                            const std::vector<scalar_t> &step,
+                            const std::vector<scalar_t> &grad_diff,
+                            std::vector<scalar_t> &grad_diff_inv_hess,
+                            std::vector<scalar_t> &inv_hess_grad_diff,
+                            const scalar_t rho) {
+  // precompute temporaries needed in the hessian update
+  const size_t n_dim = grad_diff.size();
+  for (size_t i = 0; i < n_dim; i++) {
+    // t(grad_diff) * inv_hessian
+    scalar_t temp = 0.0;
+    for (size_t j = 0; j < n_dim; j++) {
+      temp += grad_diff[j] * inv_hessian[i * n_dim + j];
+    }
+    grad_diff_inv_hess[i] = temp;
+    // inv_hessian * grad_diff
+    temp = 0.0;
+    for (size_t j = 0; j < n_dim; j++) {
+      temp += inv_hessian[i + j * n_dim] * grad_diff[j];
+    }
+    inv_hess_grad_diff[i] = temp;
+  }
+  scalar_t denom = 0.0;
+  for (size_t i = 0; i < n_dim; i++) {
+    denom += grad_diff[i] * inv_hess_grad_diff[i];
+  }
+  denom = (denom * rho) + 1.0;
+  // step is                               | n_dim x 1
+  // grad_diff_inv_hess is                 |     1 x n_dim
+  // => step * grad_diff_inv_hess is a     | n_dim x n_dim
+  // inv_hess_grad_diff is                 | n_dim x 1
+  // -> inv_hess_grad_diff * step.t() is a | n_dim x n_dim
+  for (size_t j = 0; j < n_dim; j++) {
+    for (size_t i = 0; i < n_dim; i++) {
+      // do not replace this with -= or the whole thing falls apart
+      // because of operator order precedence - e.g. whole rhs would
+      // get evaluated before -=, whereas we want to do inv_hessian - first part
+      // + second part
+      inv_hessian[j * n_dim + i] = inv_hessian[j * n_dim + i] -
+                                   // first part
+                                   rho * (step[i] * grad_diff_inv_hess[j] +
+                                          inv_hess_grad_diff[i] * step[j]) +
+                                   // second part
+                                   rho * (denom * step[i] * step[j]);
+    }
+  }
+}
+template <typename Callable, typename scalar_t = double,
+          typename Grad = fin_diff<Callable, scalar_t>>
+class BFGS {
+ private:
+  Callable &f;
+  Grad g;
+  // stopping
+  const size_t max_iter;
+  const scalar_t grad_eps, alpha;
+
+ public:
+  // constructor
+  explicit BFGS<Callable, scalar_t, Grad>(
+      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
+      const size_t max_iter = 100, const scalar_t grad_eps = 1e-8,
+      const scalar_t grad_tol = 1e-4, const scalar_t alpha = 0.03)
+      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
+
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    std::vector<scalar_t> inverse_hessian =
+        std::vector<scalar_t>(n_dim * n_dim);
+    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0),
+                          gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          grad_update = std::vector<scalar_t>(n_dim, 0.0),
+                          s = std::vector<scalar_t>(n_dim, 0.0),
+                          linesearch_temp = std::vector<scalar_t>(n_dim, 0.0),
+                          grad_diff_inv_hess(n_dim), inv_hess_grad_diff(n_dim);
+    // initialize to identity matrix
+    for (size_t i = 0; i < n_dim; i++) inverse_hessian[i + (i * n_dim)] = 1.0;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    g_lam(x, gradient);
+    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    scalar_t prev_grad_norm = norm(gradient);
+    scalar_t current_grad_norm = prev_grad_norm - grad_eps;
+    while (true) {
+      if (iter >= this->max_iter || current_grad_norm < grad_eps ||
+          std::isinf(current_grad_norm)) {
+        // evaluate at current parameters
+        scalar_t current_val = f_lam(x);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
+      }
+      // update search direction vector using -inverse_hessian * gradient
+      for (size_t j = 0; j < n_dim; j++) {
+        scalar_t temp = 0.0;
+        for (size_t i = 0; i < n_dim; i++) {
+          temp -= inverse_hessian[i + (j * n_dim)] * gradient[i];
+        }
+        search_direction[j] = temp;
+      }
+      scalar_t phi = 0.0;
+      for (size_t i = 0; i < n_dim; i++) {
+        phi += gradient[i] * search_direction[i];
+      }
+      if ((phi > 0) || std::isnan(phi) || current_grad_norm > prev_grad_norm) {
+        std::fill(inverse_hessian.begin(), inverse_hessian.end(), 0.0);
+        // reset hessian approximation and search_direction
+        for (size_t i = 0; i < n_dim; i++) {
+          inverse_hessian[i + (i * n_dim)] = 1.0;
+          search_direction[i] = -gradient[i];
+        }
+      }
+      prev_gradient = gradient;
+      const scalar_t rate = nlsolver::linesearch::more_thuente_search(
+          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha,
+          g_lam);
+      // update parameters
+      for (size_t i = 0; i < n_dim; i++) {
+        const scalar_t temp = rate * search_direction[i];
+        s[i] = temp;
+        x[i] += temp;
+      }
+      // we also need to compute the gradient at this new point
+      // update it by reference
+      g_lam(x, gradient);
+      prev_grad_norm = current_grad_norm;
+      current_grad_norm = norm(gradient);
+      // Update inverse Hessian estimate.
+      scalar_t rho = 0.0;
+      for (size_t i = 0; i < n_dim; i++) {
+        grad_update[i] = gradient[i] - prev_gradient[i];
+        rho += s[i] * grad_update[i];
+      }
+      rho = 1 / rho;
+      // update inverse hessian using Sherman Morrisson
+      update_inverse_hessian(inverse_hessian, s, grad_update,
+                             grad_diff_inv_hess, inv_hess_grad_diff, rho);
       iter++;
     }
   }
 };
 };  // namespace nlsolver
 
-namespace nlsolver::experimental {};
+namespace nlsolver::experimental {};  // namespace nlsolver::experimental
 
 namespace nlsolver::WIP {
 // TODO(JSzitas): WIP
@@ -2347,351 +2646,6 @@ class CMAESSolver {
   template <const bool minimize = true>
   void solve(std::vector<scalar_t> &x) {}
 };
-// TODO(JSzitas): this is currently a WIP based on
-// https://github.com/PatWie/CppNumericalSolvers
-// the goal here is to simplify the original interface, and get rid of the
-// Eigen dependency
-template <typename Callable, typename scalar_t = double>
-class BFGS {
- private:
-  Callable &f;
-  std::vector<scalar_t> inverse_hessian, search_direction, gradient,
-      prev_gradient;
-  //
-  std::vector<scalar_t> s, grad_update, linesearch_temp;
-  scalar_t current_val;
-
- public:
-  // constructor
-  explicit BFGS<Callable, scalar_t>(Callable &f) {}
-  // minimize interface
-  void minimize(std::vector<scalar_t> &x) { this->solve<true>(x); }
-  // maximize helper
-  void maximize(std::vector<scalar_t> &x) { this->solve<false>(x); }
-
- private:
-  template <const bool minimize = true>
-  void solve(std::vector<scalar_t> &x) {
-    const size_t dim = x.size();
-    this->inverse_hessian = std::vector<scalar_t>(dim * dim);
-    this->search_direction = std::vector<scalar_t>(dim, 0.0);
-    this->gradient = std::vector<scalar_t>(dim, 0.0);
-    // initialize to identity matrix
-    for (size_t i = 0; i < dim; i++) this->inverse_hessian[i + (i * dim)] = 1.0;
-    size_t iter = 0;
-    scalar_t prev_val = 0.0;
-    while (true) {
-      const scalar_t val = this->step(x);
-      // this->update();
-      if (!this->check(iter, val)) {
-        break;
-      }
-      iter++;
-    }
-  }
-  scalar_t step(std::vector<scalar_t> &x) {
-    // update search direction vector using -inverse_hessian * gradient
-    for (size_t j = 0; j < this->dim; j++) {
-      scalar_t temp = 0.0;
-      for (size_t i = 0; i < this->dim; i++) {
-        temp -= this->inverse_hessian[i + (j * this->dim)] * this->gradient[i];
-      }
-      this->search_direction[j] = temp;
-    }
-    //
-    scalar_t phi = 0.0;
-    for (size_t i = 0; i < this->dim; i++) {
-      phi += this->gradient[i] * this->search_direction[i];
-    }
-    if ((phi > 0) || std::isnan(phi)) {
-      std::fill(this->inverse_hessian.begin(), this->inverse_hessian.end(),
-                0.0);
-      // reset hessian approximation and search_direction
-      for (size_t i = 0; i < this->dim; i++) {
-        this->inverse_hessian[i + (i * this->dim)] = 1.0;
-        this->search_direction[i] = -this->gradient[i];
-      }
-    }
-    const scalar_t rate = nlsolver::linesearch::armijo_search(
-        this->f, this->current_val, x, this->gradient, this->search_direction,
-        this->linesearch_temp);
-    // const scalar_t rate = linesearch::MoreThuente<function_t, 1>::Search(
-    //   current, search_direction, function);
-    // update parameters
-    for (size_t i = 0; i < this->dim; i++) {
-      const scalar_t temp = rate * this->search_direction[i];
-      this->s[i] = temp;
-      x[i] += temp;
-    }
-    scalar_t val = f(x);
-    this->prev_gradient = this->gradient;
-    // we also need to compute the gradient at this new point
-    // update it by reference
-    nlsolver::finite_difference::finite_difference_gradient(this->f, x,
-                                                            this->gradient);
-    // Update inverse Hessian estimate.
-    scalar_t rho = 0.0;
-    for (size_t i = 0; i < this->dim; i++) {
-      this->grad_update[i] = this->gradient[i] - this->prev_gradient[i];
-      rho += this->s[i] * this->grad_update[i];
-    }
-    rho = 1 / rho;
-
-    // update inverse hessian using some version of Sherman Morrisson
-    update_inverse_hessian(this->inverse_hessian, this->s, this->grad_update,
-                           rho);
-    return val;
-  }
-  void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
-                              const std::vector<scalar_t> &step,
-                              const std::vector<scalar_t> &grad_diff,
-                              const scalar_t rho) {
-    std::array<scalar_t, 100> grad_diff_inv_hess, inv_hess_grad_diff;
-    // this is symmetric, and might be something we can compute only once,
-    // during the big loop (as everything else is presumably precomputed)
-    // std::array<scalar_t, 100> step_step;
-    // precompute temporaries needed in the hessian update
-    for (size_t i = 0; i < this->n_dim; i++) {
-      // t(grad_diff) * inv_hessian
-      scalar_t temp = 0.0;
-      for (size_t j = 0; j < this->n_dim; j++) {
-        temp = grad_diff[j] * inv_hessian[i * this->n_dim + j];
-      }
-      grad_diff_inv_hess[i] = temp;
-      // inv_hessian * grad_diff
-      temp = 0.0;
-      for (size_t j = 0; j < this->n_dim; j++) {
-        temp = inv_hessian[i + j * this->n_dim] * grad_diff[j];
-      }
-      inv_hess_grad_diff[i] = temp;
-    }
-
-    scalar_t denom = 0.0;
-    for (size_t i = 0; i < this->n_dim; i++) {
-      denom += grad_diff[i] * inv_hess_grad_diff[i];
-    }
-    denom = (denom * rho) + 1.0;
-
-    for (size_t i = 0; i < this->dim * this->dim; i++) {
-      // inv_hesssian -=
-      // rho *
-      //   ((step * grad_diff_inv_hess) +
-      // (inv_hess_grad_diff * step.transpose())) +
-      //   denom * (step * step.transpose());
-    }
-  }
-};
 }  // namespace nlsolver::WIP
-
-namespace nlsolver::rng {
-
-#include <cstdint>
-#define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
-
-template <typename scalar_t = float>
-struct [[maybe_unused]] halton {
-  explicit halton<scalar_t>(const scalar_t base = 2)
-      : b(base), y(1), n(0), d(1), x(1) {}
-  scalar_t yield() {
-    x = d - n;
-    if (x == 1) {
-      n = 1;
-      d *= b;
-    } else {
-      y = d;
-      while (x <= y) {
-        y /= b;
-        n = (b + 1) * y - x;
-      }
-    }
-    return (scalar_t)(n / d);
-  }
-  scalar_t operator()() { return this->yield(); }
-  [[maybe_unused]] void reset() {
-    b = 2;
-    y = 1;
-    n = 0;
-    d = 1;
-    x = 1;
-  }
-  [[maybe_unused]] std::vector<scalar_t> get_state() const {
-    std::vector<scalar_t> result(5);
-    result[0] = b;
-    result[1] = y;
-    result[2] = n;
-    result[3] = d;
-    result[4] = x;
-    return result;
-  }
-  [[maybe_unused]] void set_state(const scalar_t b_, const scalar_t y_,
-                                  const scalar_t n_, const scalar_t d_,
-                                  const scalar_t x_) {
-    this->b = b_;
-    this->y = y_;
-    this->n = n_;
-    this->d = d_;
-    this->x = x_;
-  }
-
- private:
-  scalar_t b, y, n, d, x;
-};
-
-template <typename scalar_t = float>
-struct [[maybe_unused]] recurrent {
-  recurrent<scalar_t>() : seed_(0.5), alpha_(0.618034), z_(alpha_ + seed_) {
-    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
-  }
-  [[maybe_unused]] explicit recurrent(scalar_t seed)
-      : seed_(seed), alpha_(0.618034), z_(alpha_ + seed_) {
-    this->z_ -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
-  }
-  scalar_t yield() {
-    this->z_ += this->alpha_;
-    // a slightly evil way to do z % 1 with floats
-    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
-    return this->z_;
-  }
-  scalar_t operator()() { return this->yield(); }
-  [[maybe_unused]] void reset() {
-    this->alpha_ = 0.618034;
-    this->seed_ = 0.5;
-    this->z_ = 0;
-  }
-  [[maybe_unused]] std::vector<scalar_t> get_state() const {
-    std::vector<scalar_t> result(2);
-    result[0] = this->alpha_;
-    result[1] = this->z_;
-    return result;
-  }
-  [[maybe_unused]] void set_state(scalar_t alpha = 0.618034, scalar_t z = 0) {
-    this->alpha_ = alpha;
-    this->z_ = z;
-  }
-
- private:
-  scalar_t alpha_ = 0.618034, seed_ = 0.5, z_ = 0;
-};
-
-template <typename scalar_t = float>
-struct splitmix {
-  explicit splitmix<scalar_t>() : s(12374563468) {}
-  scalar_t yield() {
-    uint64_t result = (s += 0x9E3779B97f4A7C15);
-    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
-    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
-    return (scalar_t)(result ^ (result >> 31)) / (scalar_t)MAX_SIZE_64_BIT_UINT;
-  }
-  scalar_t operator()() { return this->yield(); }
-  uint64_t yield_init() {
-    uint64_t result = (s += 0x9E3779B97f4A7C15);
-    result = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
-    result = (result ^ (result >> 27)) * 0x94D049BB133111EB;
-    return result ^ (result >> 31);
-  }
-  [[maybe_unused]] void set_state(uint64_t seed) { this->s = seed; }
-  [[maybe_unused]] std::vector<scalar_t> get_state() const {
-    std::vector<scalar_t> result(1);
-    result[0] = this->s;
-    return result;
-  }
-
- private:
-  uint64_t s;
-};
-template <typename scalar_t = float>
-struct xoshiro {
-  xoshiro<scalar_t>() {  // NOLINT
-    splitmix<scalar_t> gn;
-    s[0] = gn.yield_init();
-    s[1] = s[0] >> 32;
-    s[2] = gn.yield();
-    s[3] = s[2] >> 32;
-  }
-  scalar_t yield() {
-    uint64_t const result = s[0] + s[3];
-    uint64_t const t = s[1] << 17;
-
-    s[2] ^= s[0];
-    s[3] ^= s[1];
-    s[1] ^= s[2];
-    s[0] ^= s[3];
-
-    s[2] ^= t;
-    s[3] = bitwise_rotate(s[3], 64, 45);
-
-    return (scalar_t)result / (scalar_t)MAX_SIZE_64_BIT_UINT;
-  }
-  uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
-    return (x << rotate_bits) | (x >> (bits - rotate_bits));
-  }
-  scalar_t operator()() { return this->yield(); }
-  void reset() {
-    splitmix<scalar_t> gn;
-    s[0] = gn.yield_init();
-    s[1] = s[0] >> 32;
-
-    s[2] = gn.yield();
-    s[3] = s[2] >> 32;
-  }
-  [[maybe_unused]] void set_state(uint64_t x, uint64_t y, uint64_t z,
-                                  uint64_t t) {
-    this->s[0] = x;
-    this->s[1] = y;
-    this->s[2] = z;
-    this->s[3] = t;
-  }
-  [[maybe_unused]] std::vector<scalar_t> get_state() const {
-    std::vector<scalar_t> result(4);
-    for (size_t i = 0; i < 4; i++) {
-      result[i] = this->s[i];
-    }
-    return result;
-  }
-
- private:
-  uint64_t s[4];
-};
-
-template <typename scalar_t = float>
-struct xorshift {
-  xorshift<scalar_t>() {  // NOLINT
-    splitmix<scalar_t> gn;
-    x[0] = gn.yield_init();
-    x[1] = x[0] >> 32;
-  }
-  scalar_t yield() {
-    uint64_t t = x[0];
-    uint64_t const s = x[1];
-    x[0] = s;
-    t ^= t << 23;  // a
-    t ^= t >> 18;  // b -- Again, the shifts and the multipliers are tunable
-    t ^= s ^ (s >> 5);  // c
-    x[1] = t;
-    return static_cast<scalar_t>((t + s) /
-                                 static_cast<scalar_t>(MAX_SIZE_64_BIT_UINT));
-  }
-  scalar_t operator()() { return this->yield(); }
-  [[maybe_unused]] void reset() {
-    splitmix<scalar_t> gn;
-    x[0] = gn.yield_init();
-    x[1] = x[0] >> 32;
-  }
-  [[maybe_unused]] void set_state(uint64_t y, uint64_t z) {
-    x[0] = y;
-    x[1] = z;
-  }
-  [[maybe_unused]] std::vector<scalar_t> get_state() const {
-    std::vector<scalar_t> result(2);
-    for (size_t i = 0; i < 2; i++) {
-      result[i] = this->x[i];
-    }
-    return result;
-  }
-
- private:
-  uint64_t x[2]{};
-};
-}  // namespace nlsolver::rng
 
 #endif  // NLSOLVER_H_

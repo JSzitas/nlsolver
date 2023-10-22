@@ -18,6 +18,7 @@
 #include "nlsolver.h"  // NOLINT
 
 // baseline 'tried and tested' solvers
+using nlsolver::ConjugatedGradientDescent;
 using nlsolver::DE;
 using nlsolver::GradientDescent;
 using nlsolver::NelderMead;
@@ -26,8 +27,9 @@ using nlsolver::PSO;
 using nlsolver::SANN;
 // helper definition for GDType
 using GDType = nlsolver::GradientStepType;
+using nlsolver::BFGS;
 
-using nlsolver::ConjugatedGradientDescent;
+// experimental solvers
 
 // RNG
 using nlsolver::rng::xorshift;
@@ -89,7 +91,8 @@ int main() {
     const double t2 = (x[1] - x[0] * x[0]);
     return t1 * t1 + 100 * t2 * t2;
   };
-  auto nm_solver_lambda = NelderMead(RosenbrockLambda);
+  auto nm_solver_lambda =
+      NelderMead<decltype(RosenbrockLambda), double>(RosenbrockLambda);
   // initialize function arguments
   nm_init = {2, 7};
   // nm_init[0] = 2;
@@ -192,10 +195,10 @@ int main() {
   nm_pso_res.print();
   print_vector(nm_pso_init);
 
-  std::cout << "Gradient Descent without line-search using fixed steps: "
+  std::cout << "Gradient Descent without line-search using fixed step size: "
             << std::endl;
   auto gd_solver_fixed =
-      GradientDescent<Rosenbrock, double, GDType::Bigstep>(prob);
+      GradientDescent<Rosenbrock, double, GDType::Fixed>(prob, 0.0005);
   std::vector<double> gd_init_fixed = {2, 2};
   auto gd_res_fixed = gd_solver_fixed.minimize(gd_init_fixed);
   gd_res_fixed.print();
@@ -227,6 +230,13 @@ int main() {
   auto cgd_res = cgd_solver.minimize(cgd_init);
   cgd_res.print();
   print_vector(cgd_init);
+
+  std::cout << "BFGS (always requires linesearch)" << std::endl;
+  auto bfgs_solver = BFGS<Rosenbrock, double>(prob);
+  std::vector<double> bfgs_init = {2, 2};
+  auto bfgs_res = bfgs_solver.minimize(bfgs_init);
+  bfgs_res.print();
+  print_vector(bfgs_init);
 
   return 0;
 }
