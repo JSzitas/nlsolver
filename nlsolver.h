@@ -38,6 +38,33 @@
 #include <utility>
 #include <vector>
 
+// only for the stopwatch code
+#include <chrono>  // NOLINT [build/c++11] (this is not a Google project)
+#include <type_traits>
+
+namespace nlsolver::utils {
+/* graciously taken from: https://stackoverflow.com/a/61881422
+ * this is quite convenient, because to time a block of code you simply call
+ * the constructor, and when the block finishes it will be automatically
+ * cleaned up (and that will give you the timing).
+ */
+template <typename Resolution = std::chrono::duration<double, std::micro>>
+class [[maybe_unused]] Stopwatch {
+  typedef std::chrono::steady_clock Clock;
+
+ private:
+  std::chrono::time_point<Clock> last;
+
+ public:
+  void reset() noexcept { last = Clock::now(); }
+  Stopwatch() noexcept { reset(); }
+  auto operator()() const noexcept {  // returns time in Resolution
+    return Resolution(Clock::now() - last).count();
+  }
+  ~Stopwatch() {
+    std::cout << "This code took: " << (*this)() * 1e-6 << " seconds.\n";
+  }
+};
 // TODO(JSzitas): clean up
 template <typename scalar_t>
 [[maybe_unused]] void display_square_mat(const std::vector<scalar_t> &x) {
@@ -56,11 +83,11 @@ void display_vector(const T &x) {
   }
   if constexpr (use_newline) std::cout << std::endl;
 }
-
-// mostly dot products and other fun stuff
+};  // namespace nlsolver::utils
+// mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
 template <typename T>
-inline T dot(const T *x, const T *y, int f) {
+[[maybe_unused]] inline T dot(const T *x, const T *y, int f) {
   T s = 0;
   for (int z = 0; z < f; z++) {
     s += (*x) * (*y);
@@ -92,6 +119,228 @@ template <typename T>
   }
   return result;
 }
+template <typename T>
+[[maybe_unused]] inline T norm(const T *x, int f) {
+  T s = 0;
+  for (int z = 0; z < f; z++) {
+    s += (*x) * (*x);
+    x++;
+  }
+  return std::sqrt(s);
+}
+// inspired by annoylib, see
+// https://github.com/spotify/annoy/blob/main/src/annoylib.h
+#if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
+    (__GNUC__ > 6) && defined(__AVX512F__)
+#define DOT_USE_AVX512
+#endif
+#if !defined(NO_MANUAL_VECTORIZATION) && defined(__AVX__) && \
+    defined(__SSE__) && defined(__SSE2__) && defined(__SSE3__)
+#define DOT_USE_AVX
+#endif
+
+#if defined(DOT_USE_AVX) || defined(DOT_USE_AVX512)
+#if defined(_MSC_VER)
+#include <intrin.h>
+#elif defined(__GNUC__)
+#include <x86intrin.h>
+#endif
+#endif
+
+#ifdef DOT_USE_AVX
+// Horizontal single sum of 256bit vector.
+inline float hsum256_ps_avx(__m256 v) {
+  const __m128 x128 =
+      _mm_add_ps(_mm256_extractf128_ps(v, 1), _mm256_castps256_ps128(v));
+  const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+  const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+  return _mm_cvtss_f32(x32);
+}
+
+inline double hsum256_pd_avx(__m256d v) {
+  __m128d vlow = _mm256_castpd256_pd128(v);
+  __m128d vhigh = _mm256_extractf128_pd(v, 1);  // high 128
+  vlow = _mm_add_pd(vlow, vhigh);               // reduce down to 128
+  __m128d high64 = _mm_unpackhi_pd(vlow, vlow);
+  return _mm_cvtsd_f64(_mm_add_sd(vlow, high64));  // reduce to scalar
+}
+
+// overload
+template <>
+inline float dot<float>(const float *x, const float *y, int f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d,
+                        _mm256_mul_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y)));
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+// second overload
+template <>
+inline double dot<double>(const double *x, const double *y, int f) {
+  double result = 0;
+  if (f > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_add_pd(d,
+                        _mm256_mul_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(y)));
+      x += 4;
+      y += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *x * *y;
+    x++;
+    y++;
+  }
+  return result;
+}
+
+template <>
+inline float fast_sum<float>(const float *x, int size) {
+  float result = 0;
+  if (size > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; size > 7; size -= 8) {
+      d = _mm256_add_ps(d, _mm256_loadu_ps(x));
+      x += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; size > 0; size--) {
+    result += *x;
+    x++;
+  }
+  return result;
+}
+
+template <>
+inline double fast_sum<double>(const double *x, int size) {
+  double result = 0;
+  if (size > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; size > 3; size -= 4) {
+      d = _mm256_add_pd(d, _mm256_loadu_pd(x));
+      x += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; size > 0; size--) {
+    result += *x;
+    x++;
+  }
+  return result;
+}
+
+// multiply a vector by scalar
+template <>
+inline float vec_scalar_mult<float>(const float *vec, const float *scalar,
+                                    int f) {
+  float result = 0;
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(*scalar);
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d, _mm256_mul_ps(_mm256_loadu_ps(vec), s));
+      vec += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *vec * *scalar;
+    vec++;
+  }
+  return result;
+}
+
+// overload for doubles
+template <>
+inline double vec_scalar_mult<double>(const double *vec, const double *scalar,
+                                      int f) {
+  double result = 0;
+  // load single scalar
+  const __m256d s = _mm256_set1_pd(*scalar);
+  if (f > 3) {
+    __m256d d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_add_pd(d, _mm256_mul_pd(_mm256_loadu_pd(vec), s));
+      vec += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += *vec * *scalar;
+    vec++;
+  }
+  return result;
+}
+template <>
+inline float norm<float>(const float *x, int f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_add_ps(d,
+                        _mm256_mul_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(x)));
+      x += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += std::pow(*x, 2);
+    x++;
+  }
+  return sqrt(result);
+}
+template <>
+inline double norm<double>(const double *x, int f) {
+  double result = 0;
+  if (f > 3) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 3; f -= 4) {
+      d = _mm256_add_ps(d,
+                        _mm256_mul_ps(_mm256_loadu_pd(x), _mm256_loadu_pd(x)));
+      x += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += std::pow(*x, 2);
+    x++;
+  }
+  return sqrt(result);
+}
+#endif
 }  // namespace nlsolver::math
 
 namespace nlsolver::rng {
@@ -2288,7 +2537,8 @@ class GradientDescent {
     // compute gradient
     g_lam(x, gradient);
     while (true) {
-      const scalar_t grad_norm = norm(gradient);
+      const scalar_t grad_norm =
+          math::norm(gradient.data(), static_cast<int>(n_dim));
       max_grad_norm = std::max(max_grad_norm, grad_norm);
       if (iter >= this->max_iter || grad_norm < grad_eps ||
           std::isinf(grad_norm)) {
@@ -2329,8 +2579,9 @@ class GradientDescent {
         }
       }
       // update parameters
+      alpha_ *= f_multiplier;
       for (size_t i = 0; i < n_dim; i++) {
-        x[i] += f_multiplier * alpha_ * gradient[i];
+        x[i] += alpha_ * gradient[i];
       }
       if constexpr (step == GradientStepType::PAGE) {
         for (size_t i = 0; i < n_dim; i++) prev_gradient[i] = gradient[i];
@@ -2413,7 +2664,8 @@ class ConjugatedGradientDescent {
     }
     while (true) {
       // compute gradient
-      const scalar_t grad_norm = norm(gradient);
+      const scalar_t grad_norm =
+          math::norm(gradient.data(), static_cast<int>(n_dim));
       if (iter >= this->max_iter || grad_norm < grad_eps ||
           std::isinf(grad_norm)) {
         // evaluate at current parameters
@@ -2424,6 +2676,7 @@ class ConjugatedGradientDescent {
       alpha_ = nlsolver::linesearch::armijo_search(
           f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
       // update parameters
+      // TODO(JSzitas): SIMD candidate
       for (size_t i = 0; i < n_dim; i++) {
         x[i] += alpha_ * search_direction[i];
       }
@@ -2431,12 +2684,12 @@ class ConjugatedGradientDescent {
       // first, compute gradient.dot(gradient) with existing gradient,
       // then compute new gradient and compute the same, then compute their
       // ratio
-      scalar_t denominator = 0;
-      for (auto &val : gradient) denominator += std::pow(val, 2);
+      scalar_t denominator =
+          math::dot(gradient.data(), gradient.data(), static_cast<int>(n_dim));
       g_lam(x, gradient);
       // figure out the numerator from new gradient
-      scalar_t numerator = 0;
-      for (auto &val : gradient) numerator += std::pow(val, 2);
+      scalar_t numerator =
+          math::dot(gradient.data(), gradient.data(), static_cast<int>(n_dim));
       const scalar_t search_update = numerator / denominator;
       // update search direction
       for (size_t i = 0; i < n_dim; ++i) {
@@ -2459,28 +2712,26 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
   const size_t n_dim = grad_diff.size();
   for (size_t i = 0; i < n_dim; i++) {
     // t(grad_diff) * inv_hessian
-    scalar_t temp = 0.0;
-    for (size_t j = 0; j < n_dim; j++) {
-      temp += grad_diff[j] * inv_hessian[i * n_dim + j];
-    }
-    grad_diff_inv_hess[i] = temp;
+    grad_diff_inv_hess[i] =
+        math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim),
+                  static_cast<int>(n_dim));
     // inv_hessian * grad_diff
-    temp = 0.0;
+    // TODO(JSzitas): SIMD candidate if we do transpose on inv_hessian
+    scalar_t temp = 0.0;
     for (size_t j = 0; j < n_dim; j++) {
       temp += inv_hessian[i + j * n_dim] * grad_diff[j];
     }
     inv_hess_grad_diff[i] = temp;
   }
-  scalar_t denom = 0.0;
-  for (size_t i = 0; i < n_dim; i++) {
-    denom += grad_diff[i] * inv_hess_grad_diff[i];
-  }
+  scalar_t denom = math::dot(grad_diff.data(), inv_hess_grad_diff.data(),
+                             static_cast<int>(n_dim));
   denom = (denom * rho) + 1.0;
   // step is                               | n_dim x 1
   // grad_diff_inv_hess is                 |     1 x n_dim
   // => step * grad_diff_inv_hess is a     | n_dim x n_dim
   // inv_hess_grad_diff is                 | n_dim x 1
   // -> inv_hess_grad_diff * step.t() is a | n_dim x n_dim
+  // TODO(JSzitas): SIMD candidate
   for (size_t j = 0; j < n_dim; j++) {
     for (size_t i = 0; i < n_dim; i++) {
       // do not replace this with -= or the whole thing falls apart
@@ -2561,7 +2812,8 @@ class BFGS {
     };
     g_lam(x, gradient);
     constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    scalar_t prev_grad_norm = norm(gradient);
+    scalar_t prev_grad_norm =
+        math::norm(gradient.data(), static_cast<int>(n_dim));
     scalar_t current_grad_norm = prev_grad_norm - grad_eps;
     while (true) {
       if (iter >= this->max_iter || current_grad_norm < grad_eps ||
@@ -2573,16 +2825,12 @@ class BFGS {
       }
       // update search direction vector using -inverse_hessian * gradient
       for (size_t j = 0; j < n_dim; j++) {
-        scalar_t temp = 0.0;
-        for (size_t i = 0; i < n_dim; i++) {
-          temp -= inverse_hessian[i + (j * n_dim)] * gradient[i];
-        }
-        search_direction[j] = temp;
+        search_direction[j] =
+            -math::dot(inverse_hessian.data() + (j * n_dim), gradient.data(),
+                       static_cast<int>(n_dim));
       }
-      scalar_t phi = 0.0;
-      for (size_t i = 0; i < n_dim; i++) {
-        phi += gradient[i] * search_direction[i];
-      }
+      scalar_t phi = math::dot(gradient.data(), search_direction.data(),
+                               static_cast<int>(n_dim));
       if ((phi > 0) || std::isnan(phi) || current_grad_norm > prev_grad_norm) {
         std::fill(inverse_hessian.begin(), inverse_hessian.end(), 0.0);
         // reset hessian approximation and search_direction
@@ -2596,6 +2844,7 @@ class BFGS {
           f_lam, x, gradient, search_direction, linesearch_temp, this->alpha,
           g_lam);
       // update parameters
+      // TODO(JSzitas): SIMD candidate
       for (size_t i = 0; i < n_dim; i++) {
         const scalar_t temp = rate * search_direction[i];
         s[i] = temp;
@@ -2608,6 +2857,7 @@ class BFGS {
       current_grad_norm = norm(gradient);
       // Update inverse Hessian estimate.
       scalar_t rho = 0.0;
+      // TODO(JSzitas): SIMD candidate
       for (size_t i = 0; i < n_dim; i++) {
         grad_update[i] = gradient[i] - prev_gradient[i];
         rho += s[i] * grad_update[i];

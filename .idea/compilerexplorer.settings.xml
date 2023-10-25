@@ -21995,9 +21995,6 @@
     </option>
     <option name="filters">
       <Filters>
-        <option name="binary" value="true" />
-        <option name="binaryObject" value="true" />
-        <option name="execute" value="true" />
         <option name="labels" value="false" />
         <option name="directives" value="false" />
       </Filters>
@@ -29374,7 +29371,7 @@
         <entry key="EXPLORER_EXEC_RESULT" value="0" />
       </map>
     </option>
-    <option name="lastOpenTab" value="EXPLORER_EXEC_RESULT" />
+    <option name="lastOpenTab" value="PROJECT_INFO" />
     <option name="initialNoticeShown" value="true" />
   </component>
 </project>
