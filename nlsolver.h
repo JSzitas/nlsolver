@@ -77,13 +77,18 @@ template <typename scalar_t>
   }
 }
 template <typename T, const bool use_newline = true>
-void display_vector(const T &x) {
+[[maybe_unused]] void display_vector(const T &x) {
   for (size_t i = 0; i < x.size(); i++) {
     std::cout << x[i] << ",";
   }
   if constexpr (use_newline) std::cout << std::endl;
 }
 };  // namespace nlsolver::utils
+namespace nlsolver::common {
+struct DefaultStopper {
+  bool operator()(const size_t iter) { return false; }
+};
+}  // namespace nlsolver::common
 // mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
 template <typename T>
@@ -128,6 +133,97 @@ template <typename T>
   }
   return std::sqrt(s);
 }
+template <typename T>
+[[maybe_unused]] inline void a_plus_b(T *a, const T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *a += *b;
+    a++;
+    b++;
+  }
+}
+template <typename T>
+[[maybe_unused]] inline void a_minus_b(T *a, const T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *a -= *b;
+    a++;
+    b++;
+  }
+}
+template <typename T>
+[[maybe_unused]] inline void a_plus_b_to_c(const T *a, const T *b, T *c,
+                                           int f) {
+  for (int i = 0; i < f; i++) {
+    *c = *a + *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+
+template <typename T>
+[[maybe_unused]] inline void a_minus_b_to_c(const T *a, const T *b, T *c,
+                                            int f) {
+  for (int i = 0; i < f; i++) {
+    *c = *a - *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+
+template <typename T>
+[[maybe_unused]] inline T sum_a_plus_b_times_c(const T *a, const T *b,
+                                               const T *c, int f) {
+  T result = 0;
+  for (int i = 0; i < f; i++) {
+    result += (*a + *b) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+
+template <typename T>
+[[maybe_unused]] inline T sum_a_minus_b_times_c(const T *a, const T *b,
+                                                const T *c, int f) {
+  T result = 0;
+  for (int i = 0; i < f; i++) {
+    result += (*a - *b) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+template <typename T>
+[[maybe_unused]] inline void a_plus_scalar_to_b(const T *a, const T scalar,
+                                                T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *b = (*a + scalar);
+    a++;
+    b++;
+  }
+}
+
+template <typename T>
+[[maybe_unused]] inline void a_minus_scalar_to_b(const T *a, const T scalar,
+                                                 T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *b = (*a - scalar);
+    a++;
+    b++;
+  }
+}
+template <typename T>
+[[maybe_unused]] inline void a_mult_scalar_to_b(const T *a, const T scalar,
+                                                T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *b = (*a * scalar);
+    a++;
+    b++;
+  }
+}
 // inspired by annoylib, see
 // https://github.com/spotify/annoy/blob/main/src/annoylib.h
 #if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
@@ -167,7 +263,8 @@ inline double hsum256_pd_avx(__m256d v) {
 
 // overload
 template <>
-inline float dot<float>(const float *x, const float *y, int f) {
+[[maybe_unused]] inline float dot<float>(const float *x, const float *y,
+                                         int f) {
   float result = 0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -191,7 +288,8 @@ inline float dot<float>(const float *x, const float *y, int f) {
 
 // second overload
 template <>
-inline double dot<double>(const double *x, const double *y, int f) {
+[[maybe_unused]] inline double dot<double>(const double *x, const double *y,
+                                           int f) {
   double result = 0;
   if (f > 3) {
     __m256d d = _mm256_setzero_pd();
@@ -214,7 +312,7 @@ inline double dot<double>(const double *x, const double *y, int f) {
 }
 
 template <>
-inline float fast_sum<float>(const float *x, int size) {
+[[maybe_unused]] inline float fast_sum<float>(const float *x, int size) {
   float result = 0;
   if (size > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -234,7 +332,7 @@ inline float fast_sum<float>(const float *x, int size) {
 }
 
 template <>
-inline double fast_sum<double>(const double *x, int size) {
+[[maybe_unused]] inline double fast_sum<double>(const double *x, int size) {
   double result = 0;
   if (size > 3) {
     __m256d d = _mm256_setzero_pd();
@@ -255,8 +353,9 @@ inline double fast_sum<double>(const double *x, int size) {
 
 // multiply a vector by scalar
 template <>
-inline float vec_scalar_mult<float>(const float *vec, const float *scalar,
-                                    int f) {
+[[maybe_unused]] inline float vec_scalar_mult<float>(const float *vec,
+                                                     const float *scalar,
+                                                     int f) {
   float result = 0;
   // load single scalar
   const __m256 s = _mm256_set1_ps(*scalar);
@@ -279,8 +378,9 @@ inline float vec_scalar_mult<float>(const float *vec, const float *scalar,
 
 // overload for doubles
 template <>
-inline double vec_scalar_mult<double>(const double *vec, const double *scalar,
-                                      int f) {
+[[maybe_unused]] inline double vec_scalar_mult<double>(const double *vec,
+                                                       const double *scalar,
+                                                       int f) {
   double result = 0;
   // load single scalar
   const __m256d s = _mm256_set1_pd(*scalar);
@@ -301,7 +401,7 @@ inline double vec_scalar_mult<double>(const double *vec, const double *scalar,
   return result;
 }
 template <>
-inline float norm<float>(const float *x, int f) {
+[[maybe_unused]] inline float norm<float>(const float *x, int f) {
   float result = 0;
   if (f > 7) {
     __m256 d = _mm256_setzero_ps();
@@ -315,23 +415,23 @@ inline float norm<float>(const float *x, int f) {
   }
   // Don't forget the remaining values.
   for (; f > 0; f--) {
-    result += std::pow(*x, 2);
+    result += (*x) * (*x);
     x++;
   }
-  return sqrt(result);
+  return std::sqrt(result);
 }
 template <>
-inline double norm<double>(const double *x, int f) {
+[[maybe_unused]] inline double norm<double>(const double *x, int f) {
   double result = 0;
   if (f > 3) {
-    __m256 d = _mm256_setzero_ps();
+    __m256 d = _mm256_setzero_pd();
     for (; f > 3; f -= 4) {
-      d = _mm256_add_ps(d,
-                        _mm256_mul_ps(_mm256_loadu_pd(x), _mm256_loadu_pd(x)));
+      d = _mm256_add_pd(d,
+                        _mm256_mul_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(x)));
       x += 8;
     }
     // Sum all floats in dot register.
-    result += hsum256_ps_avx(d);
+    result += hsum256_pd_avx(d);
   }
   // Don't forget the remaining values.
   for (; f > 0; f--) {
@@ -339,6 +439,435 @@ inline double norm<double>(const double *x, int f) {
     x++;
   }
   return sqrt(result);
+}
+template <>
+[[maybe_unused]] inline void a_plus_b(float *a, const float *b, int f) {
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
+      // store results
+      _mm256_store_ps(a, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a += *b;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_plus_b(double *a, const double *b, int f) {
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
+      // store results
+      _mm256_store_pd(a, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a += *b;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_minus_b(float *a, const float *b, int f) {
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_sub_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
+      // store results
+      _mm256_store_ps(a, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a -= *b;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_minus_b(double *a, const double *b, int f) {
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
+      // store results
+      _mm256_store_pd(a, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a -= *b;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_plus_b_to_c(const float *a, const float *b,
+                                           float *c, int f) {
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
+      // store results
+      _mm256_store_ps(c, d);
+      // offset
+      a += 8;
+      b += 8;
+      c += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c = *a + *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+
+template <>
+[[maybe_unused]] inline void a_plus_b_to_c(const double *a, const double *b,
+                                           double *c, int f) {
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
+      // store results
+      _mm256_store_pd(c, d);
+      // offset
+      a += 4;
+      b += 4;
+      c += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c = *a + *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+
+template <>
+[[maybe_unused]] inline void a_minus_b_to_c(const float *a, const float *b,
+                                            float *c, int f) {
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_sub_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
+      // store results
+      _mm256_store_ps(c, d);
+      // offset
+      a += 8;
+      b += 8;
+      c += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c = *a - *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+
+template <>
+[[maybe_unused]] inline void a_minus_b_to_c(const double *a, const double *b,
+                                            double *c, int f) {
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
+      // store results
+      _mm256_store_pd(c, d);
+      // offset
+      a += 4;
+      b += 4;
+      c += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c = *a - *b;
+    a++;
+    b++;
+    c++;
+  }
+}
+template <>
+[[maybe_unused]] inline double sum_a_plus_b_times_c(const double *a,
+                                                    const double *b,
+                                                    const double *c, int f) {
+  double result = 0;
+  if (f > 4) {
+    __m256 d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_mul_pd(_mm256_loadu_pd(c),
+                        _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b)));
+      a += 4;
+      b += 4;
+      c += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += ((*a) + (*b)) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+
+template <>
+[[maybe_unused]] inline float sum_a_plus_b_times_c(const float *a,
+                                                   const float *b,
+                                                   const float *c, int f) {
+  float result = 0;
+  if (f > 8) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 3; f -= 4) {
+      d = _mm256_mul_ps(_mm256_loadu_ps(c),
+                        _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b)));
+      a += 8;
+      b += 8;
+      c += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += ((*a) + (*b)) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+
+template <>
+[[maybe_unused]] inline double sum_a_minus_b_times_c(const double *a,
+                                                     const double *b,
+                                                     const double *c, int f) {
+  double result = 0;
+  if (f > 3) {
+    __m256 d = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      d = _mm256_mul_pd(_mm256_loadu_pd(c),
+                        _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b)));
+      a += 4;
+      b += 4;
+      c += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += ((*a) - (*b)) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+
+template <>
+[[maybe_unused]] inline float sum_a_minus_b_times_c(const float *a,
+                                                    const float *b,
+                                                    const float *c, int f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      d = _mm256_mul_ps(_mm256_loadu_ps(c),
+                        _mm256_sub_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b)));
+      a += 8;
+      b += 8;
+      c += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    result += ((*a) - (*b)) * (*c);
+    a++;
+    b++;
+    c++;
+  }
+  return result;
+}
+
+template <>
+[[maybe_unused]] inline void a_plus_scalar_to_b(const float *a,
+                                                const float scalar, float *b,
+                                                int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_add_ps(_mm256_loadu_ps(a), s);
+      // store results
+      _mm256_store_ps(b, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a + scalar;
+    a++;
+    b++;
+  }
+}
+
+template <>
+[[maybe_unused]] inline void a_plus_scalar_to_b(const double *a,
+                                                const double scalar, double *b,
+                                                int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_add_pd(_mm256_loadu_pd(a), s);
+      // store results
+      _mm256_store_pd(b, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a + scalar;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_minus_scalar_to_b(const float *a,
+                                                 const float scalar, float *b,
+                                                 int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_sub_ps(_mm256_loadu_ps(a), s);
+      // store results
+      _mm256_store_ps(b, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a - scalar;
+    a++;
+    b++;
+  }
+}
+
+template <>
+[[maybe_unused]] inline void a_minus_scalar_to_b(const double *a,
+                                                 const double scalar, double *b,
+                                                 int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_sub_pd(_mm256_loadu_pd(a), s);
+      // store results
+      _mm256_store_pd(b, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a - scalar;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mult_scalar_to_b(const float *a,
+                                                const float scalar, float *b,
+                                                int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_mul_ps(_mm256_loadu_ps(a), s);
+      // store results
+      _mm256_store_ps(b, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a * scalar;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mult_scalar_to_b(const double *a,
+                                                const double scalar, double *b,
+                                                int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_mul_pd(_mm256_loadu_pd(a), s);
+      // store results
+      _mm256_store_pd(b, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b = *a * scalar;
+    a++;
+    b++;
+  }
 }
 #endif
 }  // namespace nlsolver::math
@@ -981,12 +1510,10 @@ template <typename Callable, typename scalar_t = double>
     std::vector<scalar_t> &gradient,
     const std::vector<scalar_t> &search_direction, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
-  scalar_t limit = 0.0;
   const size_t x_size = x.size();
-  // just a dot product
-  for (size_t i = 0; i < x_size; i++)
-    limit += gradient[i] * search_direction[i];
-  limit *= c;
+  scalar_t limit = nlsolver::math::dot(gradient.data(), search_direction.data(),
+                                       static_cast<int>(x_size)) *
+                   c;
 
   std::vector<scalar_t> linesearch_temp(x_size);
   scalar_t search_val = line_at_alpha<Callable, scalar_t>(
@@ -1006,12 +1533,10 @@ template <typename Callable, typename scalar_t = double>
     const std::vector<scalar_t> &search_direction,
     std::vector<scalar_t> &linesearch_temp, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
-  scalar_t limit = 0.0;
   const size_t x_size = x.size();
-  // just a dot product
-  for (size_t i = 0; i < x_size; i++)
-    limit += gradient[i] * search_direction[i];
-  limit *= c;
+  scalar_t limit = nlsolver::math::dot(gradient.data(), search_direction.data(),
+                                       static_cast<int>(x_size)) *
+                   c;
   scalar_t search_val =
       line_at_alpha(f, linesearch_temp, x, search_direction, alpha);
   while (search_val > (current_f_val + alpha * limit)) {
@@ -1028,12 +1553,10 @@ template <typename Callable, typename scalar_t = double>
     std::vector<scalar_t> &linesearch_temp, scalar_t alpha = 1.0) {
   constexpr scalar_t c = 0.2, rho = 0.9;
   const scalar_t current_f_val = f(x);
-  scalar_t limit = 0.0;
   const size_t x_size = x.size();
-  // just a dot product
-  for (size_t i = 0; i < x_size; i++)
-    limit += gradient[i] * search_direction[i];
-  limit *= c;
+  scalar_t limit = nlsolver::math::dot(gradient.data(), search_direction.data(),
+                                       static_cast<int>(x_size)) *
+                   c;
   scalar_t search_val =
       line_at_alpha(f, linesearch_temp, x, search_direction, alpha);
   while (search_val > (current_f_val + alpha * limit)) {
@@ -1147,6 +1670,7 @@ inline void update_centroid(std::vector<scalar_t> &centroid,
   std::fill(centroid.begin(), centroid.end(), 0.0);
   size_t i = 0;
   for (; i < except; i++) {
+    // TODO(JSzitas): SIMD Candidate
     for (size_t j = 0; j < centroid.size(); j++) {
       centroid[j] += x.vals[i][j];
     }
@@ -1170,6 +1694,7 @@ inline void simplex_transform(const std::vector<scalar_t> &point,
                               const std::vector<scalar_t> &lower) {
   for (size_t i = 0; i < point.size(); i++) {
     scalar_t temp = 0.0;
+    // TODO(JSzitas): SIMD Candidate
     if constexpr (reflect) {
       temp = centroid[i] + coef * (centroid[i] - point[i]);
     } else {
@@ -1192,6 +1717,7 @@ inline void shrink(simplex<scalar_t> &current_simplex, const size_t best,
     // hopefully the contiguous data here can help a bit with cache
     // locality
     for (size_t j = 0; j < best; j++) {
+      // TODO(JSzitas): SIMD Candidate
       current_simplex.vals[i][j] =
           best_val[j] + sigma * (current_simplex.vals[i][j] - best_val[j]);
     }
@@ -1201,6 +1727,7 @@ inline void shrink(simplex<scalar_t> &current_simplex, const size_t best,
   // misprediction
   for (size_t i = best + 1; i < current_simplex.size(); i++) {
     for (size_t j = 0; j < best; j++) {
+      // TODO(JSzitas): SIMD Candidate
       current_simplex.vals[i][j] =
           best_val[j] + sigma * (current_simplex.vals[i][j] - best_val[j]);
     }
@@ -1211,6 +1738,7 @@ template <typename scalar_t = double>
 static inline scalar_t std_err(const std::vector<scalar_t> &x) {
   size_t i = 0;
   scalar_t mean_val = 0, result = 0;
+  // TODO(JSzitas): SIMD Candidate
   for (; i < x.size(); i++) {
     mean_val += x[i];
   }
@@ -1811,6 +2339,7 @@ class PSO {
         std::vector<scalar_t>(this->n_particles, 10000);
   }
   void update_velocities() {
+    // TODO(JSzitas): SIMD Candidate
     // scalar_t r_p = 0, r_g = 0;
     for (size_t i = 0; i < this->n_particles; i++) {
       for (size_t j = 0; j < this->n_dim; j++) {
@@ -1831,6 +2360,7 @@ class PSO {
     }
   }
   void update_positions() {
+    // TODO(JSzitas): SIMD Candidate
     if constexpr (Type == Vanilla) {
       for (size_t i = 0; i < this->n_particles; i++) {
         for (size_t j = 0; j < this->n_dim; j++) {
@@ -1843,6 +2373,7 @@ class PSO {
       for (size_t i = 0; i < this->n_particles; i++) {
         for (size_t j = 0; j < this->n_dim; j++) {
           // no need to use velocity - all can be inlined here
+          // TODO(JSzitas): SIMD Candidate
           this->particle_positions[i][j] =
               this->inertia * rnorm<scalar_t>(this->generator) +
               // discount position
@@ -2202,6 +2733,7 @@ class NelderMeadPSO {
       // update first simplex point
       auto n = static_cast<scalar_t>(centroid.size());
       for (i = 0; i < centroid.size(); i++) {
+        // TODO(JSzitas): SIMD Candidate
         particle_positions[current_order[0]][i] =
             centroid[i] + ((1.0 - sqrt(n + 1.0)) / n * scale);
       }
@@ -2314,6 +2846,7 @@ class NelderMeadPSO {
         // generate random movements
         const scalar_t r_p = generator(), r_g = generator();
         // update current velocity for current particle - inertia update
+        // TODO(JSzitas): SIMD Candidate
         scalar_t temp =
             (this->inertia * velocity[j]) +
             // cognitive update - this should be based on better
@@ -2343,6 +2876,7 @@ class NelderMeadPSO {
     for (; i < last_point; i++) {
       const std::vector<scalar_t> &particle =
           this->particle_positions[current_order[i]];
+      // TODO(JSzitas): SIMD Candidate
       for (size_t j = 0; j < centroid.size(); j++) {
         centroid[j] += particle[j];
       }
@@ -2360,6 +2894,7 @@ class NelderMeadPSO {
       // locality
       std::vector<scalar_t> &current =
           this->particle_positions[current_order[0]];
+      // TODO(JSzitas): SIMD Candidate
       for (size_t j = 0; j < n_dim; j++) {
         current[j] = best[j] + sigma_ * (current[j] - best[j]);
       }
@@ -2580,6 +3115,7 @@ class GradientDescent {
       }
       // update parameters
       alpha_ *= f_multiplier;
+      // TODO(JSzitas): SIMD Candidate
       for (size_t i = 0; i < n_dim; i++) {
         x[i] += alpha_ * gradient[i];
       }
@@ -2592,6 +3128,7 @@ class GradientDescent {
         if (generator() > p) {
           // only do a small update where new gradient is old gradient
           // + difference between gradients
+          // TODO(JSzitas): SIMD Candidate
           for (size_t i = 0; i < n_dim; i++) {
             gradient[i] += ratio * (gradient[i] - prev_gradient[i]);
           }
@@ -2659,9 +3196,9 @@ class ConjugatedGradientDescent {
     };
     g_lam(x, gradient);
     // set search direction for linesearch
-    for (size_t i = 0; i < n_dim; i++) {
-      search_direction[i] = f_multiplier * gradient[i];
-    }
+    nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
+                                       search_direction.data(),
+                                       static_cast<int>(n_dim));
     while (true) {
       // compute gradient
       const scalar_t grad_norm =
@@ -2677,6 +3214,8 @@ class ConjugatedGradientDescent {
           f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
       // update parameters
       // TODO(JSzitas): SIMD candidate
+      // nlsolver::math::a_mult_scalar_to_b(search_direction.data(), alpha_,
+      // x.data(), static_cast<int>(n_dim));
       for (size_t i = 0; i < n_dim; i++) {
         x[i] += alpha_ * search_direction[i];
       }
@@ -2692,6 +3231,7 @@ class ConjugatedGradientDescent {
           math::dot(gradient.data(), gradient.data(), static_cast<int>(n_dim));
       const scalar_t search_update = numerator / denominator;
       // update search direction
+      // TODO(JSzitas): SIMD Candidate
       for (size_t i = 0; i < n_dim; ++i) {
         search_direction[i] *= search_update;
         // effectively beta * search_direction - gradient
@@ -2812,9 +3352,8 @@ class BFGS {
     };
     g_lam(x, gradient);
     constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    scalar_t prev_grad_norm =
-        math::norm(gradient.data(), static_cast<int>(n_dim));
-    scalar_t current_grad_norm = prev_grad_norm - grad_eps;
+    scalar_t prev_grad_norm = 1e9;
+    scalar_t current_grad_norm = 1e8;
     while (true) {
       if (iter >= this->max_iter || current_grad_norm < grad_eps ||
           std::isinf(current_grad_norm)) {
@@ -2844,24 +3383,20 @@ class BFGS {
           f_lam, x, gradient, search_direction, linesearch_temp, this->alpha,
           g_lam);
       // update parameters
-      // TODO(JSzitas): SIMD candidate
-      for (size_t i = 0; i < n_dim; i++) {
-        const scalar_t temp = rate * search_direction[i];
-        s[i] = temp;
-        x[i] += temp;
-      }
+      nlsolver::math::a_mult_scalar_to_b(search_direction.data(), rate,
+                                         s.data(), static_cast<int>(n_dim));
+      nlsolver::math::a_plus_b(x.data(), s.data(), static_cast<int>(n_dim));
       // we also need to compute the gradient at this new point
       // update it by reference
       g_lam(x, gradient);
       prev_grad_norm = current_grad_norm;
       current_grad_norm = norm(gradient);
-      // Update inverse Hessian estimate.
-      scalar_t rho = 0.0;
-      // TODO(JSzitas): SIMD candidate
-      for (size_t i = 0; i < n_dim; i++) {
-        grad_update[i] = gradient[i] - prev_gradient[i];
-        rho += s[i] * grad_update[i];
-      }
+      // Update grad difference, rho and inverse hessian
+      nlsolver::math::a_minus_b_to_c(gradient.data(), prev_gradient.data(),
+                                     grad_update.data(),
+                                     static_cast<int>(n_dim));
+      scalar_t rho = nlsolver::math::dot(grad_update.data(), s.data(),
+                                         static_cast<int>(n_dim));
       rho = 1 / rho;
       // update inverse hessian using Sherman Morrisson
       update_inverse_hessian(inverse_hessian, s, grad_update,
