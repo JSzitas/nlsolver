@@ -132,7 +132,7 @@ template <typename T>
     s += (*x) * (*x);
     x++;
   }
-  return s;  // std::sqrt(s);
+  return std::sqrt(s);
 }
 template <typename T>
 [[maybe_unused]] inline void a_plus_b(T *a, const T *b, int f) {
@@ -447,7 +447,7 @@ template <>
     result += (*x) * (*x);
     x++;
   }
-  return result;  // std::sqrt(result);
+  return std::sqrt(result);
 }
 template <>
 [[maybe_unused]] inline double norm<double>(const double *x, int f) {
@@ -467,7 +467,7 @@ template <>
     result += std::pow(*x, 2);
     x++;
   }
-  return result;  // sqrt(result);
+  return sqrt(result);
 }
 template <>
 [[maybe_unused]] inline void a_plus_b(float *a, const float *b, int f) {
