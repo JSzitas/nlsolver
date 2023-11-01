@@ -85,6 +85,7 @@ template <typename T, const bool use_newline = true>
 }
 };  // namespace nlsolver::utils
 namespace nlsolver::common {
+// TODO(JSzitas): Figure out if we can make a nice stopping functor
 struct DefaultStopper {
   bool operator()(const size_t iter) { return false; }
 };
@@ -131,7 +132,7 @@ template <typename T>
     s += (*x) * (*x);
     x++;
   }
-  return std::sqrt(s);
+  return s;  // std::sqrt(s);
 }
 template <typename T>
 [[maybe_unused]] inline void a_plus_b(T *a, const T *b, int f) {
@@ -224,6 +225,34 @@ template <typename T>
     b++;
   }
 }
+template <typename T>
+[[maybe_unused]] inline void a_mult_scalar_add_b(const T *a, const T scalar,
+                                                 T *b, int f) {
+  for (int i = 0; i < f; i++) {
+    *b += (*a * scalar);
+    a++;
+    b++;
+  }
+}
+template <typename T>
+[[maybe_unused]] inline void a_minus_b_mult_scalar_add_c(const T *a, const T *b,
+                                                         const T scalar, T *c,
+                                                         int f) {
+  for (int i = 0; i < f; i++) {
+    *c += (*a - *b) * scalar;
+    a++;
+    b++;
+    c++;
+  }
+}
+template <typename T>
+[[maybe_unused]] inline void a_mul_scalar(T *a, const T scalar, int f) {
+  for (int i = 0; i < f; i++) {
+    *a *= scalar;
+    a++;
+  }
+}
+
 // inspired by annoylib, see
 // https://github.com/spotify/annoy/blob/main/src/annoylib.h
 #if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
@@ -418,7 +447,7 @@ template <>
     result += (*x) * (*x);
     x++;
   }
-  return std::sqrt(result);
+  return result;  // std::sqrt(result);
 }
 template <>
 [[maybe_unused]] inline double norm<double>(const double *x, int f) {
@@ -438,7 +467,7 @@ template <>
     result += std::pow(*x, 2);
     x++;
   }
-  return sqrt(result);
+  return result;  // sqrt(result);
 }
 template <>
 [[maybe_unused]] inline void a_plus_b(float *a, const float *b, int f) {
@@ -867,6 +896,155 @@ template <>
     *b = *a * scalar;
     a++;
     b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mult_scalar_add_b(const float *a,
+                                                 const float scalar, float *b,
+                                                 int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_add_ps(_mm256_loadu_ps(b),
+                        _mm256_mul_ps(_mm256_loadu_ps(a), s));
+      // store results
+      _mm256_store_ps(b, d);
+      // offset
+      a += 8;
+      b += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b += *a * scalar;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mult_scalar_add_b(const double *a,
+                                                 const double scalar, double *b,
+                                                 int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_add_pd(_mm256_loadu_pd(b),
+                        _mm256_mul_pd(_mm256_loadu_pd(a), s));
+      // store results
+      _mm256_store_pd(b, d);
+      // offset
+      a += 4;
+      b += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *b += *a * scalar;
+    a++;
+    b++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_minus_b_mult_scalar_add_c(const float *a,
+                                                         const float *b,
+                                                         const float scalar,
+                                                         float *c, int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_add_ps(_mm256_loadu_ps(c),
+                        _mm256_mul_ps(s, _mm256_sub_ps(_mm256_loadu_ps(a),
+                                                       _mm256_loadu_ps(b))));
+      // store results
+      _mm256_store_ps(c, d);
+      // offset
+      a += 8;
+      b += 8;
+      c += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c += (*a - *b) * scalar;
+    a++;
+    b++;
+    c++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_minus_b_mult_scalar_add_c(const double *a,
+                                                         const double *b,
+                                                         const double scalar,
+                                                         double *c, int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_add_pd(_mm256_loadu_pd(c),
+                        _mm256_mul_pd(s, _mm256_sub_pd(_mm256_loadu_pd(a),
+                                                       _mm256_loadu_pd(b))));
+      // store results
+      _mm256_store_pd(c, d);
+      // offset
+      a += 4;
+      b += 4;
+      c += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *c += (*a - *b) * scalar;
+    a++;
+    b++;
+    c++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mul_scalar(float *a, const float scalar, int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_ps(scalar);
+  if (f > 7) {
+    for (; f > 7; f -= 8) {
+      __m256 d = _mm256_setzero_ps();
+      d = _mm256_mul_ps(s, _mm256_loadu_ps(a));
+      // store results
+      _mm256_store_ps(a, d);
+      // offset
+      a += 8;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a *= scalar;
+    a++;
+  }
+}
+template <>
+[[maybe_unused]] inline void a_mul_scalar(double *a, const double scalar,
+                                          int f) {
+  // load single scalar
+  const __m256 s = _mm256_set1_pd(scalar);
+  if (f > 3) {
+    for (; f > 3; f -= 4) {
+      __m256 d = _mm256_setzero_pd();
+      d = _mm256_mul_pd(s, _mm256_loadu_pd(a));
+      // store results
+      _mm256_store_pd(a, d);
+      // offset
+      a += 4;
+    }
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    *a *= scalar;
+    a++;
   }
 }
 #endif
@@ -3032,6 +3210,7 @@ class GradientDescent {
   template <const bool minimize = true>
   solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
     std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0),
                           prev_gradient = std::vector<scalar_t>(n_dim, 0.0);
     if constexpr (step == GradientStepType::Linesearch) {
@@ -3072,8 +3251,7 @@ class GradientDescent {
     // compute gradient
     g_lam(x, gradient);
     while (true) {
-      const scalar_t grad_norm =
-          math::norm(gradient.data(), static_cast<int>(n_dim));
+      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
       max_grad_norm = std::max(max_grad_norm, grad_norm);
       if (iter >= this->max_iter || grad_norm < grad_eps ||
           std::isinf(grad_norm)) {
@@ -3083,8 +3261,11 @@ class GradientDescent {
                                        grad_evals_used);
       }
       if constexpr (step == GradientStepType::Linesearch) {
+        nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
+                                           this->search_direction.data(),
+                                           i_dim);
         for (size_t i = 0; i < n_dim; i++) {
-          this->search_direction[i] = f_multiplier * gradient[i];
+          // this->search_direction[i] = f_multiplier * gradient[i];
           this->gradient_temp[i] = gradient[i];
         }
         alpha_ = nlsolver::linesearch::more_thuente_search(
@@ -3115,10 +3296,8 @@ class GradientDescent {
       }
       // update parameters
       alpha_ *= f_multiplier;
-      // TODO(JSzitas): SIMD Candidate
-      for (size_t i = 0; i < n_dim; i++) {
-        x[i] += alpha_ * gradient[i];
-      }
+      nlsolver::math::a_mult_scalar_add_b(gradient.data(), alpha_, x.data(),
+                                          i_dim);
       if constexpr (step == GradientStepType::PAGE) {
         for (size_t i = 0; i < n_dim; i++) prev_gradient[i] = gradient[i];
       }
@@ -3128,10 +3307,9 @@ class GradientDescent {
         if (generator() > p) {
           // only do a small update where new gradient is old gradient
           // + difference between gradients
-          // TODO(JSzitas): SIMD Candidate
-          for (size_t i = 0; i < n_dim; i++) {
-            gradient[i] += ratio * (gradient[i] - prev_gradient[i]);
-          }
+          nlsolver::math::a_minus_b_mult_scalar_add_c(
+              gradient.data(), prev_gradient.data(), ratio, gradient.data(),
+              i_dim);
         }
       }
       iter++;
@@ -3166,6 +3344,7 @@ class ConjugatedGradientDescent {
   template <const bool minimize = true>
   solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
     std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
     // we need additional temporaries for linesearch
     std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0);
@@ -3197,12 +3376,10 @@ class ConjugatedGradientDescent {
     g_lam(x, gradient);
     // set search direction for linesearch
     nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
-                                       search_direction.data(),
-                                       static_cast<int>(n_dim));
+                                       search_direction.data(), i_dim);
     while (true) {
       // compute gradient
-      const scalar_t grad_norm =
-          math::norm(gradient.data(), static_cast<int>(n_dim));
+      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
       if (iter >= this->max_iter || grad_norm < grad_eps ||
           std::isinf(grad_norm)) {
         // evaluate at current parameters
@@ -3212,31 +3389,23 @@ class ConjugatedGradientDescent {
       }
       alpha_ = nlsolver::linesearch::armijo_search(
           f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
-      // update parameters
-      // TODO(JSzitas): SIMD candidate
-      // nlsolver::math::a_mult_scalar_to_b(search_direction.data(), alpha_,
-      // x.data(), static_cast<int>(n_dim));
-      for (size_t i = 0; i < n_dim; i++) {
-        x[i] += alpha_ * search_direction[i];
-      }
+      // update parameters; x[i] += search_direction[i] * alpha_;
+      nlsolver::math::a_mult_scalar_add_b(search_direction.data(), alpha_,
+                                          x.data(), i_dim);
       // recompute gradient, compute new search direction using conjugation
       // first, compute gradient.dot(gradient) with existing gradient,
       // then compute new gradient and compute the same, then compute their
       // ratio
-      scalar_t denominator =
-          math::dot(gradient.data(), gradient.data(), static_cast<int>(n_dim));
+      scalar_t denominator = math::dot(gradient.data(), gradient.data(), i_dim);
       g_lam(x, gradient);
       // figure out the numerator from new gradient
-      scalar_t numerator =
-          math::dot(gradient.data(), gradient.data(), static_cast<int>(n_dim));
+      scalar_t numerator = math::dot(gradient.data(), gradient.data(), i_dim);
       const scalar_t search_update = numerator / denominator;
       // update search direction
-      // TODO(JSzitas): SIMD Candidate
-      for (size_t i = 0; i < n_dim; ++i) {
-        search_direction[i] *= search_update;
-        // effectively beta * search_direction - gradient
-        search_direction[i] += f_multiplier * gradient[i];
-      }
+      nlsolver::math::a_mul_scalar(search_direction.data(), search_update,
+                                   i_dim);
+      nlsolver::math::a_mult_scalar_add_b(gradient.data(), f_multiplier,
+                                          search_direction.data(), i_dim);
       iter++;
     }
   }
@@ -3250,11 +3419,11 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
                             const scalar_t rho) {
   // precompute temporaries needed in the hessian update
   const size_t n_dim = grad_diff.size();
+  int i_dim = static_cast<int>(n_dim);
   for (size_t i = 0; i < n_dim; i++) {
     // t(grad_diff) * inv_hessian
     grad_diff_inv_hess[i] =
-        math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim),
-                  static_cast<int>(n_dim));
+        math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim), i_dim);
     // inv_hessian * grad_diff
     // TODO(JSzitas): SIMD candidate if we do transpose on inv_hessian
     scalar_t temp = 0.0;
@@ -3263,8 +3432,8 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
     }
     inv_hess_grad_diff[i] = temp;
   }
-  scalar_t denom = math::dot(grad_diff.data(), inv_hess_grad_diff.data(),
-                             static_cast<int>(n_dim));
+  scalar_t denom =
+      math::dot(grad_diff.data(), inv_hess_grad_diff.data(), i_dim);
   denom = (denom * rho) + 1.0;
   // step is                               | n_dim x 1
   // grad_diff_inv_hess is                 |     1 x n_dim
@@ -3301,8 +3470,8 @@ class BFGS {
   // constructor
   explicit BFGS<Callable, scalar_t, Grad>(
       Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
-      const size_t max_iter = 100, const scalar_t grad_eps = 1e-8,
-      const scalar_t grad_tol = 1e-4, const scalar_t alpha = 0.03)
+      const size_t max_iter = 100, const scalar_t grad_eps = 5e-3,
+      const scalar_t alpha = 1)
       : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
 
   // minimize interface
@@ -3318,6 +3487,7 @@ class BFGS {
   template <const bool minimize = true>
   solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
     const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
     std::vector<scalar_t> inverse_hessian =
         std::vector<scalar_t>(n_dim * n_dim);
     std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0),
@@ -3356,6 +3526,7 @@ class BFGS {
     scalar_t current_grad_norm = 1e8;
     while (true) {
       if (iter >= this->max_iter || current_grad_norm < grad_eps ||
+          std::abs(current_grad_norm - prev_grad_norm) < grad_eps ||
           std::isinf(current_grad_norm)) {
         // evaluate at current parameters
         scalar_t current_val = f_lam(x);
@@ -3364,12 +3535,10 @@ class BFGS {
       }
       // update search direction vector using -inverse_hessian * gradient
       for (size_t j = 0; j < n_dim; j++) {
-        search_direction[j] =
-            -math::dot(inverse_hessian.data() + (j * n_dim), gradient.data(),
-                       static_cast<int>(n_dim));
+        search_direction[j] = -math::dot(inverse_hessian.data() + (j * n_dim),
+                                         gradient.data(), i_dim);
       }
-      scalar_t phi = math::dot(gradient.data(), search_direction.data(),
-                               static_cast<int>(n_dim));
+      scalar_t phi = math::dot(gradient.data(), search_direction.data(), i_dim);
       if ((phi > 0) || std::isnan(phi) || current_grad_norm > prev_grad_norm) {
         std::fill(inverse_hessian.begin(), inverse_hessian.end(), 0.0);
         // reset hessian approximation and search_direction
@@ -3384,8 +3553,8 @@ class BFGS {
           g_lam);
       // update parameters
       nlsolver::math::a_mult_scalar_to_b(search_direction.data(), rate,
-                                         s.data(), static_cast<int>(n_dim));
-      nlsolver::math::a_plus_b(x.data(), s.data(), static_cast<int>(n_dim));
+                                         s.data(), i_dim);
+      nlsolver::math::a_plus_b(x.data(), s.data(), i_dim);
       // we also need to compute the gradient at this new point
       // update it by reference
       g_lam(x, gradient);
@@ -3393,10 +3562,8 @@ class BFGS {
       current_grad_norm = norm(gradient);
       // Update grad difference, rho and inverse hessian
       nlsolver::math::a_minus_b_to_c(gradient.data(), prev_gradient.data(),
-                                     grad_update.data(),
-                                     static_cast<int>(n_dim));
-      scalar_t rho = nlsolver::math::dot(grad_update.data(), s.data(),
-                                         static_cast<int>(n_dim));
+                                     grad_update.data(), i_dim);
+      scalar_t rho = nlsolver::math::dot(grad_update.data(), s.data(), i_dim);
       rho = 1 / rho;
       // update inverse hessian using Sherman Morrisson
       update_inverse_hessian(inverse_hessian, s, grad_update,
