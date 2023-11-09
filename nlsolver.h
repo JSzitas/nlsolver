@@ -252,6 +252,28 @@ template <typename T>
     a++;
   }
 }
+// this is best defined here even though it is not technically a function
+// we probably want to reuse much
+template <typename T>
+[[maybe_unused]] inline void hessian_update_inner_loop(
+    T *inv_hessian, const T *step, const T *grad_diff_inv_hess, const T rho,
+    const T denom, const int n_dim) {
+  for (int j = 0; j < n_dim; j++) {
+    for (int i = 0; i < n_dim; i++) {
+      // do not replace this with -= or the whole thing falls apart
+      // because of operator order precedence - e.g. whole rhs would
+      // get evaluated before -=, whereas we want to do inv_hessian - first part
+      // + second part
+      *(inv_hessian + j * n_dim + i) =
+          *(inv_hessian + j * n_dim + i) -
+          // first part
+          rho * (*(step + i) * *(grad_diff_inv_hess + j) +
+                 *(grad_diff_inv_hess + i) * *(step + j) +
+                 // second part ->  multiply(step[i], denom * step[j])
+                 denom * *(step + i) * *(step + j));
+    }
+  }
+}
 
 // inspired by annoylib, see
 // https://github.com/spotify/annoy/blob/main/src/annoylib.h
@@ -1047,6 +1069,119 @@ template <>
     a++;
   }
 }
+// TODO(JSzitas): Hess impl
+/*
+template<>
+[[maybe_unused]] inline void hessian_update_inner_loop(
+    float *inv_hessian,
+    const float *step,
+    const float *grad_diff_inv_hess,
+    const float rho,
+    const float denom,
+    const int n_dim) {
+  for (int j = 0; j < n_dim; j++) {
+    int f = n_dim;
+    // we will be loading into this
+
+    // carry out multiplies with rho and step + j first
+    __m256 s = _mm256_set1_ps(denom * *(step + j));
+    // add step to its own register - we will be reusing this a bunch
+    const __m256 step_reg = _mm256_loadu_ps(step);
+    // run denom * step[i] * step[j]
+    s = _mm256_mul_ps(step_reg, s);
+    // multiply with step_i and move to register
+    // we need to do two more multiply adds -> step[i] * grad_d_i_h[j] and
+    // step[j] * grad_d_i_h[i]
+    // also keep accumulating in s
+    s = _mm256_add_ps(s,
+                      _mm256_mul_ps(step_reg,
+                                    _mm256_set1_ps(*(grad_diff_inv_hess + j))));
+    // finally we only need step[j] and grad_d_i_h[i]
+    s = _mm256_add_ps(s,
+                      _mm256_mul_ps(_mm256_loadu_ps(grad_diff_inv_hess),
+                                    _mm256_set1_ps(step + j)));
+    // now we do a vector multiply with rho
+
+    // subtract from inv hessian
+    // write back from s to inv hessian
+    // progress loop
+
+
+    *(step + i) * *(grad_diff_inv_hess + j) +
+                                              *(grad_diff_inv_hess + i) * *(step
++ j)
+
+    _mm256_mul_ps(step_reg, _mm256_set1_ps(*(grad_diff_inv_hess + j))),
+
+        )
+        ;
+
+    grad_diff_inv_hess
+    //*(step + i) * *(grad_diff_inv_hess + j) +
+        *(grad_diff_inv_hess + i) * *(step + j)
+
+
+    _mm256_mul_ps(step_reg, s);
+
+    *(step + i) * *(grad_diff_inv_hess + j) +
+        *(grad_diff_inv_hess + i) * *(step + j)
+
+
+
+    if (f > 7) {
+      for (; f > 7; f -= 8) {
+        __m256 d = _mm256_setzero_ps();
+        d = _mm256_add_ps(_mm256_loadu_ps(c),
+                          _mm256_mul_ps(s, _mm256_sub_ps(_mm256_loadu_ps(a),
+                                                         _mm256_loadu_ps(b))));
+
+    *(inv_hessian + j * n_dim)
+
+
+
+    for (int i = 0; i < n_dim; i++) {
+      // do not replace this with -= or the whole thing falls apart
+      // because of operator order precedence - e.g. whole rhs would
+      // get evaluated before -=, whereas we want to do inv_hessian - first part
+      // + second part
+      *(inv_hessian + j * n_dim + i) = *(inv_hessian + j * n_dim + i) -
+                                       // first part
+                                       rho * (*(step + i) * *(grad_diff_inv_hess
++ j) +
+                                              *(grad_diff_inv_hess + i) * *(step
++ j) +
+                                              // second part ->
+multiply(step[i], denom * step[j]) denom * *(step+ i) * *(step + j));
+    }
+  }
+}
+
+template<>
+[[maybe_unused]] inline void hessian_update_inner_loop(
+    double *inv_hessian,
+    const double *step,
+    const double *grad_diff_inv_hess,
+    const double rho,
+    const double denom,
+    const int n_dim) {
+  for (int j = 0; j < n_dim; j++) {
+    for (int i = 0; i < n_dim; i++) {
+      // do not replace this with -= or the whole thing falls apart
+      // because of operator order precedence - e.g. whole rhs would
+      // get evaluated before -=, whereas we want to do inv_hessian - first part
+      // + second part
+      *(inv_hessian + j * n_dim + i) = *(inv_hessian + j * n_dim + i) -
+                                       // first part
+                                       rho * (*(step + i) * *(grad_diff_inv_hess
++ j) +
+                                              *(grad_diff_inv_hess + i) * *(step
++ j) +
+                                              // second part ->
+multiply(step[i], denom * step[j]) denom * *(step+ i) * *(step + j));
+    }
+  }
+}
+*/
 #endif
 }  // namespace nlsolver::math
 
@@ -1793,12 +1928,12 @@ struct simplex {
   explicit simplex<scalar_t>(const std::vector<scalar_t> &x,
                              const scalar_t step = -1) {
     std::vector<std::vector<scalar_t>> init_simplex(x.size() + 1);
-    init_simplex[0] = x;
-    // this follows Gao and Han, see:
-    // 'Proper initialization is crucial for the Nelder–Mead simplex search.'
-    // (2019), Wessing, S.  Optimization Letters 13, p. 847–856
-    // (also at https://link.springer.com/article/10.1007/s11590-018-1284-4)
-    // default initialization
+    // init_simplex[0] = x;
+    //  this follows Gao and Han, see:
+    //  'Proper initialization is crucial for the Nelder–Mead simplex search.'
+    //  (2019), Wessing, S.  Optimization Letters 13, p. 847–856
+    //  (also at https://link.springer.com/article/10.1007/s11590-018-1284-4)
+    //  default initialization
     if (step < 0) {
       // get infinity norm of initial vector
       scalar_t x_inf_norm = max_abs_vec(x);
@@ -1806,9 +1941,11 @@ struct simplex {
       scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
       // if larger than 10, set to 10
       scalar_t scale = a < 10 ? a : 10;
+      for (auto &vertex : init_simplex) {
+        vertex = x;
+      }
       for (size_t i = 1; i < init_simplex.size(); i++) {
-        init_simplex[i] = x;
-        init_simplex[i][i] = x[i] + scale;
+        init_simplex[i][i] += scale;
       }
       // update first simplex point
       auto n = static_cast<scalar_t>(x.size());
@@ -1817,9 +1954,11 @@ struct simplex {
       }
       // otherwise, first element of simplex has unchanged starting values
     } else {
+      for (auto &vertex : init_simplex) {
+        vertex = x;
+      }
       for (size_t i = 1; i < init_simplex.size(); i++) {
-        init_simplex[i] = x;
-        init_simplex[i][i] = x[i] + step;
+        init_simplex[i][i] += step;
       }
     }
     this->vals = init_simplex;
@@ -3415,25 +3554,16 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
                             const std::vector<scalar_t> &step,
                             const std::vector<scalar_t> &grad_diff,
                             std::vector<scalar_t> &grad_diff_inv_hess,
-                            std::vector<scalar_t> &inv_hess_grad_diff,
                             const scalar_t rho) {
   // precompute temporaries needed in the hessian update
   const size_t n_dim = grad_diff.size();
   int i_dim = static_cast<int>(n_dim);
   for (size_t i = 0; i < n_dim; i++) {
-    // t(grad_diff) * inv_hessian
     grad_diff_inv_hess[i] =
         math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim), i_dim);
-    // inv_hessian * grad_diff
-    // TODO(JSzitas): SIMD candidate if we do transpose on inv_hessian
-    scalar_t temp = 0.0;
-    for (size_t j = 0; j < n_dim; j++) {
-      temp += inv_hessian[i + j * n_dim] * grad_diff[j];
-    }
-    inv_hess_grad_diff[i] = temp;
   }
   scalar_t denom =
-      math::dot(grad_diff.data(), inv_hess_grad_diff.data(), i_dim);
+      math::dot(grad_diff.data(), grad_diff_inv_hess.data(), i_dim);
   denom = (denom * rho) + 1.0;
   // step is                               | n_dim x 1
   // grad_diff_inv_hess is                 |     1 x n_dim
@@ -3447,13 +3577,16 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
       // because of operator order precedence - e.g. whole rhs would
       // get evaluated before -=, whereas we want to do inv_hessian - first part
       // + second part
-      inv_hessian[j * n_dim + i] = inv_hessian[j * n_dim + i] -
-                                   // first part
-                                   rho * (step[i] * grad_diff_inv_hess[j] +
-                                          inv_hess_grad_diff[i] * step[j]) +
-                                   // second part
-                                   rho * (denom * step[i] * step[j]);
+      inv_hessian[j * n_dim + i] =
+          inv_hessian[j * n_dim + i] -
+          // first part
+          rho * (step[i] * grad_diff_inv_hess[j] +
+                 grad_diff_inv_hess[i] * step[j] +
+                 // second part ->  multiply(step[i], denom * step[j])
+                 denom * step[i] * step[j]);
     }
+    // inline intrinsics would be complicated, but the above can probably be
+    // reduced to something a lot faster that way
   }
 }
 template <typename Callable, typename scalar_t = double,
@@ -3567,7 +3700,8 @@ class BFGS {
       rho = 1 / rho;
       // update inverse hessian using Sherman Morrisson
       update_inverse_hessian(inverse_hessian, s, grad_update,
-                             grad_diff_inv_hess, inv_hess_grad_diff, rho);
+                             grad_diff_inv_hess,  // inv_hess_grad_diff,
+                             rho);
       iter++;
     }
   }
