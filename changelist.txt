@@ -3,9 +3,7 @@ TODO:
 consider moving entirely away from std::vector of std::vector to a flattened 
 std::vector
 
-consider Nelder Mead PSO where PSO is used for last search using bounds found using Nelder Mead
-
-implement BFGS and L-BFGS-B
-
-implement Coordinate Descent and Gradient Descent
+implement L-BFGS-B, or at least BFGS-B
+implement CMAES
+implement Coordinate Descent
 

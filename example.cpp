@@ -55,6 +55,7 @@ void print_vector(std::vector<double> &x) {
 
 // to use any C++ standard random number generator just pass in a generator
 // functor e.g. using Mersene Twister
+/*
 #include <cstdint>  // NOLINT
 #include <random>
 struct std_MT {
@@ -69,6 +70,7 @@ struct std_MT {
   }
   double operator()() { return this->distribution(this->generator); }
 };
+ */
 
 int main() {
   // define problem functor - in our case a variant of the rosenbrock function
@@ -116,19 +118,6 @@ int main() {
   std::vector<double> de_init = {2, 7};
 
   auto de_res = de_solver.minimize(de_init);
-  de_res.print();
-  print_vector(de_init);
-
-  std::cout << "Differential evolution with std::mt19937: " << std::endl;
-  // using standard library random number generators
-  std_MT std_gen;
-  // again initialize solver, this time also with the RNG
-  // if strategy is not specifieed, defaults to random
-  auto de_solver_MT = DE<Rosenbrock, std_MT, double>(prob, std_gen);
-  // reset initial state
-  de_init[0] = 2;
-  de_init[1] = 7;
-  de_res = de_solver_MT.minimize(de_init);
   de_res.print();
   print_vector(de_init);
 

@@ -290,7 +290,7 @@ template <typename T>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #elif defined(__GNUC__)
-#include <x86intrin.h>
+#include <immintrin.h>  //<x86intrin.h>
 #endif
 #endif
 
@@ -475,7 +475,7 @@ template <>
 [[maybe_unused]] inline double norm<double>(const double *x, int f) {
   double result = 0;
   if (f > 3) {
-    __m256 d = _mm256_setzero_pd();
+    __m256d d = _mm256_setzero_pd();
     for (; f > 3; f -= 4) {
       d = _mm256_add_pd(d,
                         _mm256_mul_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(x)));
@@ -495,10 +495,9 @@ template <>
 [[maybe_unused]] inline void a_plus_b(float *a, const float *b, int f) {
   if (f > 7) {
     for (; f > 7; f -= 8) {
-      __m256 d = _mm256_setzero_ps();
-      d = _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
+      __m256 d = _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
       // store results
-      _mm256_store_ps(a, d);
+      _mm256_storeu_ps(a, d);
       // offset
       a += 8;
       b += 8;
@@ -515,10 +514,9 @@ template <>
 [[maybe_unused]] inline void a_plus_b(double *a, const double *b, int f) {
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
-      d = _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
+      __m256d d = _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
       // store results
-      _mm256_store_pd(a, d);
+      _mm256_storeu_pd(a, d);
       // offset
       a += 4;
       b += 4;
@@ -538,7 +536,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_sub_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
       // store results
-      _mm256_store_ps(a, d);
+      _mm256_storeu_ps(a, d);
       // offset
       a += 8;
       b += 8;
@@ -555,10 +553,10 @@ template <>
 [[maybe_unused]] inline void a_minus_b(double *a, const double *b, int f) {
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
       // store results
-      _mm256_store_pd(a, d);
+      _mm256_storeu_pd(a, d);
       // offset
       a += 4;
       b += 4;
@@ -579,7 +577,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_add_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
       // store results
-      _mm256_store_ps(c, d);
+      _mm256_storeu_ps(c, d);
       // offset
       a += 8;
       b += 8;
@@ -600,7 +598,7 @@ template <>
                                            double *c, int f) {
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
       // store results
       _mm256_store_pd(c, d);
@@ -627,7 +625,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_sub_ps(_mm256_loadu_ps(a), _mm256_loadu_ps(b));
       // store results
-      _mm256_store_ps(c, d);
+      _mm256_storeu_ps(c, d);
       // offset
       a += 8;
       b += 8;
@@ -648,10 +646,10 @@ template <>
                                             double *c, int f) {
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b));
       // store results
-      _mm256_store_pd(c, d);
+      _mm256_storeu_pd(c, d);
       // offset
       a += 4;
       b += 4;
@@ -672,7 +670,7 @@ template <>
                                                     const double *c, int f) {
   double result = 0;
   if (f > 4) {
-    __m256 d = _mm256_setzero_pd();
+    __m256d d = _mm256_setzero_pd();
     for (; f > 3; f -= 4) {
       d = _mm256_mul_pd(_mm256_loadu_pd(c),
                         _mm256_add_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b)));
@@ -726,7 +724,7 @@ template <>
                                                      const double *c, int f) {
   double result = 0;
   if (f > 3) {
-    __m256 d = _mm256_setzero_pd();
+    __m256d d = _mm256_setzero_pd();
     for (; f > 3; f -= 4) {
       d = _mm256_mul_pd(_mm256_loadu_pd(c),
                         _mm256_sub_pd(_mm256_loadu_pd(a), _mm256_loadu_pd(b)));
@@ -785,7 +783,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_add_ps(_mm256_loadu_ps(a), s);
       // store results
-      _mm256_store_ps(b, d);
+      _mm256_storeu_ps(b, d);
       // offset
       a += 8;
       b += 8;
@@ -804,13 +802,13 @@ template <>
                                                 const double scalar, double *b,
                                                 int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_add_pd(_mm256_loadu_pd(a), s);
       // store results
-      _mm256_store_pd(b, d);
+      _mm256_storeu_pd(b, d);
       // offset
       a += 4;
       b += 4;
@@ -834,7 +832,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_sub_ps(_mm256_loadu_ps(a), s);
       // store results
-      _mm256_store_ps(b, d);
+      _mm256_storeu_ps(b, d);
       // offset
       a += 8;
       b += 8;
@@ -853,13 +851,13 @@ template <>
                                                  const double scalar, double *b,
                                                  int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_sub_pd(_mm256_loadu_pd(a), s);
       // store results
-      _mm256_store_pd(b, d);
+      _mm256_storeu_pd(b, d);
       // offset
       a += 4;
       b += 4;
@@ -883,7 +881,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_mul_ps(_mm256_loadu_ps(a), s);
       // store results
-      _mm256_store_ps(b, d);
+      _mm256_storeu_ps(b, d);
       // offset
       a += 8;
       b += 8;
@@ -901,13 +899,13 @@ template <>
                                                 const double scalar, double *b,
                                                 int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_mul_pd(_mm256_loadu_pd(a), s);
       // store results
-      _mm256_store_pd(b, d);
+      _mm256_storeu_pd(b, d);
       // offset
       a += 4;
       b += 4;
@@ -932,7 +930,7 @@ template <>
       d = _mm256_add_ps(_mm256_loadu_ps(b),
                         _mm256_mul_ps(_mm256_loadu_ps(a), s));
       // store results
-      _mm256_store_ps(b, d);
+      _mm256_storeu_ps(b, d);
       // offset
       a += 8;
       b += 8;
@@ -950,14 +948,14 @@ template <>
                                                  const double scalar, double *b,
                                                  int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_add_pd(_mm256_loadu_pd(b),
                         _mm256_mul_pd(_mm256_loadu_pd(a), s));
       // store results
-      _mm256_store_pd(b, d);
+      _mm256_storeu_pd(b, d);
       // offset
       a += 4;
       b += 4;
@@ -984,7 +982,7 @@ template <>
                         _mm256_mul_ps(s, _mm256_sub_ps(_mm256_loadu_ps(a),
                                                        _mm256_loadu_ps(b))));
       // store results
-      _mm256_store_ps(c, d);
+      _mm256_storeu_ps(c, d);
       // offset
       a += 8;
       b += 8;
@@ -1005,15 +1003,15 @@ template <>
                                                          const double scalar,
                                                          double *c, int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_add_pd(_mm256_loadu_pd(c),
                         _mm256_mul_pd(s, _mm256_sub_pd(_mm256_loadu_pd(a),
                                                        _mm256_loadu_pd(b))));
       // store results
-      _mm256_store_pd(c, d);
+      _mm256_storeu_pd(c, d);
       // offset
       a += 4;
       b += 4;
@@ -1037,7 +1035,7 @@ template <>
       __m256 d = _mm256_setzero_ps();
       d = _mm256_mul_ps(s, _mm256_loadu_ps(a));
       // store results
-      _mm256_store_ps(a, d);
+      _mm256_storeu_ps(a, d);
       // offset
       a += 8;
     }
@@ -1052,13 +1050,13 @@ template <>
 [[maybe_unused]] inline void a_mul_scalar(double *a, const double scalar,
                                           int f) {
   // load single scalar
-  const __m256 s = _mm256_set1_pd(scalar);
+  const __m256d s = _mm256_set1_pd(scalar);
   if (f > 3) {
     for (; f > 3; f -= 4) {
-      __m256 d = _mm256_setzero_pd();
+      __m256d d = _mm256_setzero_pd();
       d = _mm256_mul_pd(s, _mm256_loadu_pd(a));
       // store results
-      _mm256_store_pd(a, d);
+      _mm256_storeu_pd(a, d);
       // offset
       a += 4;
     }
@@ -1069,119 +1067,6 @@ template <>
     a++;
   }
 }
-// TODO(JSzitas): Hess impl
-/*
-template<>
-[[maybe_unused]] inline void hessian_update_inner_loop(
-    float *inv_hessian,
-    const float *step,
-    const float *grad_diff_inv_hess,
-    const float rho,
-    const float denom,
-    const int n_dim) {
-  for (int j = 0; j < n_dim; j++) {
-    int f = n_dim;
-    // we will be loading into this
-
-    // carry out multiplies with rho and step + j first
-    __m256 s = _mm256_set1_ps(denom * *(step + j));
-    // add step to its own register - we will be reusing this a bunch
-    const __m256 step_reg = _mm256_loadu_ps(step);
-    // run denom * step[i] * step[j]
-    s = _mm256_mul_ps(step_reg, s);
-    // multiply with step_i and move to register
-    // we need to do two more multiply adds -> step[i] * grad_d_i_h[j] and
-    // step[j] * grad_d_i_h[i]
-    // also keep accumulating in s
-    s = _mm256_add_ps(s,
-                      _mm256_mul_ps(step_reg,
-                                    _mm256_set1_ps(*(grad_diff_inv_hess + j))));
-    // finally we only need step[j] and grad_d_i_h[i]
-    s = _mm256_add_ps(s,
-                      _mm256_mul_ps(_mm256_loadu_ps(grad_diff_inv_hess),
-                                    _mm256_set1_ps(step + j)));
-    // now we do a vector multiply with rho
-
-    // subtract from inv hessian
-    // write back from s to inv hessian
-    // progress loop
-
-
-    *(step + i) * *(grad_diff_inv_hess + j) +
-                                              *(grad_diff_inv_hess + i) * *(step
-+ j)
-
-    _mm256_mul_ps(step_reg, _mm256_set1_ps(*(grad_diff_inv_hess + j))),
-
-        )
-        ;
-
-    grad_diff_inv_hess
-    //*(step + i) * *(grad_diff_inv_hess + j) +
-        *(grad_diff_inv_hess + i) * *(step + j)
-
-
-    _mm256_mul_ps(step_reg, s);
-
-    *(step + i) * *(grad_diff_inv_hess + j) +
-        *(grad_diff_inv_hess + i) * *(step + j)
-
-
-
-    if (f > 7) {
-      for (; f > 7; f -= 8) {
-        __m256 d = _mm256_setzero_ps();
-        d = _mm256_add_ps(_mm256_loadu_ps(c),
-                          _mm256_mul_ps(s, _mm256_sub_ps(_mm256_loadu_ps(a),
-                                                         _mm256_loadu_ps(b))));
-
-    *(inv_hessian + j * n_dim)
-
-
-
-    for (int i = 0; i < n_dim; i++) {
-      // do not replace this with -= or the whole thing falls apart
-      // because of operator order precedence - e.g. whole rhs would
-      // get evaluated before -=, whereas we want to do inv_hessian - first part
-      // + second part
-      *(inv_hessian + j * n_dim + i) = *(inv_hessian + j * n_dim + i) -
-                                       // first part
-                                       rho * (*(step + i) * *(grad_diff_inv_hess
-+ j) +
-                                              *(grad_diff_inv_hess + i) * *(step
-+ j) +
-                                              // second part ->
-multiply(step[i], denom * step[j]) denom * *(step+ i) * *(step + j));
-    }
-  }
-}
-
-template<>
-[[maybe_unused]] inline void hessian_update_inner_loop(
-    double *inv_hessian,
-    const double *step,
-    const double *grad_diff_inv_hess,
-    const double rho,
-    const double denom,
-    const int n_dim) {
-  for (int j = 0; j < n_dim; j++) {
-    for (int i = 0; i < n_dim; i++) {
-      // do not replace this with -= or the whole thing falls apart
-      // because of operator order precedence - e.g. whole rhs would
-      // get evaluated before -=, whereas we want to do inv_hessian - first part
-      // + second part
-      *(inv_hessian + j * n_dim + i) = *(inv_hessian + j * n_dim + i) -
-                                       // first part
-                                       rho * (*(step + i) * *(grad_diff_inv_hess
-+ j) +
-                                              *(grad_diff_inv_hess + i) * *(step
-+ j) +
-                                              // second part ->
-multiply(step[i], denom * step[j]) denom * *(step+ i) * *(step + j));
-    }
-  }
-}
-*/
 #endif
 }  // namespace nlsolver::math
 
@@ -1553,9 +1438,9 @@ template <typename scalar_t>
   bool bound = false;
 
   // Check the input parameters for errors.
-  if ((brackt & ((stp <= std::min<scalar_t>(stx, sty)) |
-                 (stp >= std::max<scalar_t>(stx, sty)))) |
-      (dx * (stp - stx) >= 0.0) | (stpmax < stpmin)) {
+  if ((brackt & ((stp <= std::min<scalar_t>(stx, sty)) ||
+                 (stp >= std::max<scalar_t>(stx, sty)))) ||
+      (dx * (stp - stx) >= 0.0) || (stpmax < stpmin)) {
     return -1;
   }
 
@@ -2073,7 +1958,7 @@ struct solver_status {
   solver_status<scalar_t>(const scalar_t f_val, const size_t iter_used,
                           const size_t f_calls_used,
                           const size_t grad_evals_used = 0)
-      : function_value(f_val),
+      : f_value(f_val),
         iteration(iter_used),
         function_calls_used(f_calls_used),
         gradient_evals_used(grad_evals_used) {}
@@ -2085,23 +1970,22 @@ struct solver_status {
       std::cout << "Gradient evaluations used: " << this->gradient_evals_used
                 << std::endl;
     }
-    std::cout << "With final function value of " << this->function_value
-              << std::endl;
+    std::cout << "With final function value of " << this->f_value << std::endl;
   }
   std::tuple<size_t, size_t, scalar_t, size_t> get_summary() const {
     return std::make_tuple(this->function_calls_used, this->iteration,
-                           this->function_value, this->gradient_evals_used);
+                           this->f_value, this->gradient_evals_used);
   }
   void add(const solver_status<scalar_t> &additional_runs) {
     auto other = additional_runs.get_summary();
     this->function_calls_used += std::get<0>(other);
     this->iteration += std::get<1>(other);
-    this->function_value = std::get<2>(other);
+    this->f_value = std::get<2>(other);
     this->gradient_evals_used += std::get<3>(other);
   }
 
  private:
-  scalar_t function_value;
+  scalar_t f_value;
   size_t iteration, function_calls_used, gradient_evals_used;
 };
 
@@ -3619,6 +3503,7 @@ class BFGS {
  private:
   template <const bool minimize = true>
   solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    static_assert(minimize, "BFGS currently only supports minimization");
     const size_t n_dim = x.size();
     int i_dim = static_cast<int>(n_dim);
     std::vector<scalar_t> inverse_hessian =
@@ -3654,7 +3539,7 @@ class BFGS {
       return;
     };
     g_lam(x, gradient);
-    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    // constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
     scalar_t prev_grad_norm = 1e9;
     scalar_t current_grad_norm = 1e8;
     while (true) {

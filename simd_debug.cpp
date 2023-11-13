@@ -27,10 +27,12 @@ void print_vector(std::vector<double> &x) {
 }
 
 int main() {
-  std::cout << "Running ARMA(2,1) without intercept in R as: \n"
-            << " 'arima(lynx[1:100], order =c(2,0,1),include.mean = F)' \n"
-            << " yields coefficients: 0.9319,  -0.2051,  0.4152 \n"
-            << " we should hopefully reproduce those.\n";
+  std::cout << "Running ARMA(8,3) without intercept in R as: \n"
+            << " 'arima(lynx[1:100], order =c(8,0,3),include.mean = F)' \n"
+            << " yields coefficients: 1.4956, -1.1573, 0.583, -0.2557, 0.0968, "
+               "0.0556, -0.2102, 0.3656, \n"
+            << "-0.4517, 0.1225, 0.0714 \n"
+            << " we should hopefully reproduce those(or at least similar.)\n";
   // define problem functor - nlsolver actually supports lambdas
   const std::vector<double> y = {
       269,  321,  585,  871,  1475, 2821, 3928, 5943, 4950, 2577, 523,  98,
@@ -45,16 +47,17 @@ int main() {
   size_t p = 8, q = 3, n = 100;
   // std::vector<double> resid(n, 0.0);
   auto arma_lam = [&](std::vector<double> &x) {
-    std::array<double, 100> resid;
+    std::array<double, 100> resid;  // NOLINT
     resid[0] = 0;
     resid[1] = 0;
     // simple ARMA(2,2) model; we fix the p and q here
     // just to simplify, even though this would not
     // be done in the real world
     int ma_offset;
-    double ssq = 0.0, tmp = 0.0;
+    double ssq = 0.0, tmp;
     for (size_t l = p; l < n; l++) {
-      ma_offset = std::min(l - p, q);
+      ma_offset =
+          std::min<size_t>(l - p, q);  // NOLINT // for testing this is fine
       tmp = y[l];
       for (size_t j = 0; j < p; j++) {
         tmp -= x[j] * y[l - j - 1];
@@ -67,7 +70,7 @@ int main() {
       resid[l] = tmp;
       ssq += tmp * tmp;
     }
-    return 0.5 * std::log(ssq / n);
+    return 0.5 * std::log(ssq / static_cast<double>(n));
   };
 
   std::vector<double> bfgs_init(p + q, 0.0);
