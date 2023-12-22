@@ -1,4 +1,4 @@
-all: debug example debug_simd
+all: debug example debug_simd example_simd
 
 debug:
 	clang++ -std=c++17 -O0 -g -Wall example.cpp -o debug
@@ -9,6 +9,6 @@ debug_simd:
 example_simd:
 	clang++ -std=c++17 -O0 -g -Wall -march=native example.cpp -o example_simd
 clean:
-	rm -rf debug example debug_simd
+	rm -rf debug example example_simd simd_debug
 
 

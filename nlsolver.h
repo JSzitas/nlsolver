@@ -23,6 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#pragma clang diagnostic push
 #ifndef NLSOLVER_H_
 #define NLSOLVER_H_
 
@@ -84,12 +85,6 @@ template <typename T, const bool use_newline = true>
   if constexpr (use_newline) std::cout << std::endl;
 }
 };  // namespace nlsolver::utils
-namespace nlsolver::common {
-// TODO(JSzitas): Figure out if we can make a nice stopping functor
-struct DefaultStopper {
-  bool operator()(const size_t iter) { return false; }
-};
-}  // namespace nlsolver::common
 // mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
 template <typename T>
@@ -1861,6 +1856,16 @@ struct simplex {
                                                   : new_val[i];
     }
   }
+  // TODO(JSzitas): clean up
+  [[maybe_unused]] void print() const {
+    for (const auto &val : vals) {
+      for (const auto &item : val) {
+        std::cout << item << ",";
+      }
+      std::cout << "\n";
+    }
+    std::cout << "\n";
+  }
   [[nodiscard]] size_t size() const { return this->vals.size(); }
   std::vector<std::vector<scalar_t>> vals;
 };
@@ -2003,8 +2008,8 @@ class NelderMead {
   explicit NelderMead<Callable, scalar_t>(
       Callable &f, const scalar_t step = -1, const scalar_t alpha = 1,
       const scalar_t gamma = 2, const scalar_t rho = 0.5,
-      const scalar_t sigma = 0.5, const scalar_t eps = 10e-4,
-      const size_t max_iter = 500, const size_t no_change_best_tol = 100,
+      const scalar_t sigma = 0.5, const scalar_t eps = 1e-3,
+      const size_t max_iter = 500, const size_t no_change_best_tol = 10,
       const size_t restarts = 3)
       : f(f),
         step(step),
@@ -2183,6 +2188,7 @@ class NelderMead {
           function_calls_used += current_simplex.size() - 1;
         }
       }
+      current_simplex.print();
     }
   }
 };
@@ -3593,30 +3599,130 @@ class BFGS {
 };
 };  // namespace nlsolver
 
-namespace nlsolver::experimental {};  // namespace nlsolver::experimental
-
-namespace nlsolver::WIP {
+namespace nlsolver::experimental {
 // TODO(JSzitas): WIP
 template <typename Callable, typename RNG, typename scalar_t = double>
-class CMAESSolver {
+class CMAES {
  private:
   Callable &f;
   RNG &generator;
-  const size_t pop_size;
-  const scalar_t crossover_prob, differential_weight;
 
  public:
   // constructor
-  CMAESSolver<Callable, RNG, scalar_t>(Callable &f, RNG &generator) {}
+  CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator) {}
   // minimize interface
-  void minimize(std::vector<scalar_t> &x) { this->solve<true>(x); }
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
   // maximize helper
-  void maximize(std::vector<scalar_t> &x) { this->solve<false>(x); }
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
 
  private:
   template <const bool minimize = true>
-  void solve(std::vector<scalar_t> &x) {}
+  void solve(std::vector<scalar_t> &x) {
+    const size_t n = x.size();
+    size_t la = std::ceil(4 + round(3 * log(n)));
+    const size_t mu = std::floor(la / 2);
+    std::vector<scalar_t> w(mu, 0.0);
+    // TVarVector w = TVarVector::Zero(mu);
+    for (size_t i = 0; i < mu; i++) {
+      w[i] = std::log(static_cast<scalar_t>(mu) + 1 / 2) -
+             log(static_cast<double>(i) + 1);
+    }
+    scalar_t w_sum = 0.0;
+    for (auto &weight : w) w_sum += weight;
+    // normalize weights
+    for (auto &weight : w) weight /= w_sum;
+    scalar_t mu_eff = 0.0;
+    for (auto &weight : w) mu_eff += weight * weight;
+    mu_eff = 1 / mu_eff;
+    // increase to 16 samples for very small populations
+    la = std::max<size_t>(size_t(16), la);
+    const scalar_t cc = (4. + mu_eff / n) / (n + 4. + 2. * mu_eff / n);
+    const scalar_t cs = (mu_eff + 2.) / (n + mu_eff + 5.);
+    const scalar_t c1 = 2. / (pow(n + 1.3, 2.) + mu_eff);
+    const scalar_t cmu = std::min(
+        1. - c1, 2. * (mu_eff - 2. + 1. / mu_eff) / (pow(n + 2, 2.) + mu_eff));
+    const scalar_t ds =
+        1. + cs + 2. * std::max(0., sqrt((mu_eff - 1.) / (n + 1.)) - 1.);
+    const scalar_t chi = sqrt(n) * (1. - 1. / (4. * n) + 1. / (21. * n * n));
+    const scalar_t hsig_thr = (1.4 + 2 / (n + 1.)) * chi;
+
+    std::vector<scalar_t> pc(n, 0.0), ps(n, 0.0);
+    // these are technically matrices
+    std::vector<scalar_t> B(n * n, 0.0), D(n * n, 0.0), C(n * n, 0.0);
+    for (size_t i = 0; i < n; i++) {
+      B[i + i * n] = 1.0;
+      C[i + i * n] = 1.0;
+      D[i + i * n] = 1.0;
+    }
+    return solver_status<scalar_t>(1, 1, 1);
+    /*
+    scalar_t sigma = m_stepSize;
+    TVector xmean = x0;
+    TVector zmean = TVector::Zero(n);
+    TMatrix arz(n, la);
+    TMatrix arx(n, la);
+    TVarVector costs(la);
+    Scalar prevCost = objFunc.value(x0);
+    // CMA-ES Main Loop
+    size_t eigen_last_eval = 0;
+    size_t eigen_next_eval = std::max<Scalar>(1, 1/(10*n*(c1+cmu)));
+    this->m_current.reset();
+    do {
+      for (int k = 0; k < la; ++k) {
+        arz.col(k) = normDist(n);
+        arx.col(k) = xmean + sigma * B*D*arz.col(k);
+        costs[k] = objFunc(arx.col(k));
+      }
+      std::vector<size_t> indices = index_partial_sort(costs, mu);
+      xmean = TVector::Zero(n);
+      zmean = TVector::Zero(n);
+      for (int k = 0; k < mu; k++) {
+        zmean += w[k]*arz.col(indices[k]);
+        xmean += w[k]*arx.col(indices[k]);
+      }
+      // Update evolution paths
+      ps = (1. - cs)*ps + sqrt(cs*(2. - cs)*mu_eff) * B*zmean;
+      Scalar hsig = (ps.norm()/sqrt(pow(1 - (1. - cs), (2 *
+    (this->m_current.iterations + 1)))) < hsig_thr) ? 1.0 : 0.0; pc = (1. -
+    cc)*pc + hsig*sqrt(cc*(2. - cc)*mu_eff)*(B*D*zmean);
+      // Adapt covariance matrix
+      C = (1 - c1 - cmu)*C
+          + c1*(pc*pc.transpose() + (1 - hsig)*cc*(2 - cc)*C);
+      for (int k = 0; k < mu; ++k) {
+        TVector temp = B*D*arz.col(k);
+        C += cmu*w(k)*temp*temp.transpose();
+      }
+      sigma = sigma * exp((cs/ds) * ((ps).norm()/chi - 1.));
+
+      ++Super::m_current.iterations;
+      if ((Super::m_current.iterations - eigen_last_eval) == eigen_next_eval) {
+        // Update B and D
+        eigen_last_eval = Super::m_current.iterations;
+        Eigen::SelfAdjointEigenSolver<THessian> eigenSolver(C);
+        B = eigenSolver.eigenvectors();
+        D.diagonal() = eigenSolver.eigenvalues().array().sqrt();
+      }
+      Super::m_current.condition = D.diagonal().maxCoeff() /
+    D.diagonal().minCoeff(); Super::m_current.xDelta = (xmean - x0).norm(); x0 =
+    xmean; Super::m_current.fDelta = fabs(costs[indices[0]] - prevCost);
+      prevCost = costs[indices[0]];
+      if (fabs(costs[indices[0]] - costs[indices[mu-1]]) < 1e-6) {
+        sigma = sigma * exp(0.2+cs/ds);
+      }
+      Super::m_status = checkConvergence(this->m_stop, this->m_current);
+    } while (objFunc.callback(this->m_current, x0) && (this->m_status ==
+    Status::Continue));
+    // Return the best evaluated solution
+    x0 = xmean;
+    m_stepSize = sigma;
+*/
+  }
 };
-}  // namespace nlsolver::WIP
+}  // namespace nlsolver::experimental
 
 #endif  // NLSOLVER_H_
+#pragma clang diagnostic pop
