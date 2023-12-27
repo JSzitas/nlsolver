@@ -39,6 +39,154 @@
 #include <utility>
 #include <vector>
 
+namespace tinyqr::internal {
+    template <typename scalar_t>
+    std::tuple<scalar_t, scalar_t> givens_rotation(scalar_t a, scalar_t b) {
+        if (std::abs(b) <= std::numeric_limits<scalar_t>::min()) {
+            return std::make_tuple(1.0, 0.0);
+        } else {
+            if (std::abs(b) > std::abs(a)) {
+                const scalar_t r = a / b;
+                const scalar_t s = 1.0 / sqrt(1.0 + std::pow(r, 2));
+                return std::make_tuple(s * r, s);
+            } else {
+                const scalar_t r = b / a;
+                const scalar_t c = 1.0 / sqrt(1.0 + std::pow(r, 2));
+                return std::make_tuple(c, c * r);
+            }
+        }
+    }
+    template <typename scalar_t>
+    inline void A_matmul_B_to_C(std::vector<scalar_t> &A, std::vector<scalar_t> &B,
+                                std::vector<scalar_t> &C, const size_t ncol) {
+        for (size_t k = 0; k < ncol; k++) {
+            for (size_t l = 0; l < ncol; l++) {
+                scalar_t accumulator = 0.0;
+                for (size_t m = 0; m < ncol; m++) {
+                    accumulator += A[m * ncol + k] * B[l * ncol + m];
+                }
+                C[l * ncol + k] = accumulator;
+            }
+        }
+    }
+// this is the implementation of QR decomposition - this does not get exposed,
+// only the nice(r) facades do
+    template <typename scalar_t>
+    void qr_impl(std::vector<scalar_t> &Q, std::vector<scalar_t> &R, const size_t n,
+                 const scalar_t tol) {
+        for (size_t j = 0; j < n; j++) {
+            for (size_t i = n - 1; i > j; i--) {
+                // using tuples and structured bindings should make this fairly ok
+                // performance wise
+                const auto [c, s] = givens_rotation(R[(j * n) + (i - 1)], R[j * n + i]);
+                // you can make the matrix multiplication implicit, as the givens rotation
+                // only impacts a moving 2x2 block
+                for (size_t k = 0; k < n; ++k) {
+                    // first do G'R - keep in mind this is transposed
+                    size_t upper = k * n + (i - 1);
+                    size_t lower = k * n + i;
+                    scalar_t temp_1 = R[upper];
+                    scalar_t temp_2 = R[lower];
+                    // carry out the multiplies on required elements
+                    R[upper] = c * temp_1 + s * temp_2;
+                    R[lower] = -s * temp_1 + c * temp_2;
+                    // reuse temporaries from above to
+                    // QG - note that this is not transposed
+                    upper = i * n + k;
+                    lower = (i - 1) * n + k;
+                    temp_1 = Q[upper];
+                    temp_2 = Q[lower];
+                    // again, NOT transposed, so s and -s are flipped
+                    Q[upper] = c * temp_1 - s * temp_2;
+                    Q[lower] = s * temp_1 + c * temp_2;
+                }
+            }
+        }
+        // clean up R - particularly under the diagonal
+        for (auto &val : R) {
+            val = std::abs(val) < tol ? 0.0 : val;
+        }
+    }
+}  // namespace tinyqr::internal
+namespace tinyqr {
+    template <typename scalar_t>
+    struct QR {
+        std::vector<scalar_t> Q;
+        std::vector<scalar_t> R;
+    };
+
+    template <typename scalar_t>
+    [[maybe_unused]] QR<scalar_t> qr_decomposition(const std::vector<scalar_t> &A,
+                                                   const scalar_t tol = 1e-8) {
+        const size_t n = std::sqrt(A.size());
+        // initialize Q and R
+        std::vector<scalar_t> Q(n * n, 0.0);
+        // Q is an identity matrix
+        for (size_t i = 0; i < n; i++) Q[i * n + i] = 1.0;
+        std::vector<scalar_t> R = A;
+        tinyqr::internal::qr_impl<scalar_t>(Q, R, n, tol);
+        return {Q, R};
+    }
+
+    template <typename scalar_t>
+    struct eigendecomposition {
+        std::vector<scalar_t> eigenvals;
+        std::vector<scalar_t> eigenvecs;
+    };
+
+    template <typename scalar_t>
+    [[maybe_unused]] eigendecomposition<scalar_t> qr_algorithm(
+            const std::vector<scalar_t> &A, const size_t max_iter = 25,
+            const scalar_t tol = 1e-8) {
+        auto Ak = A;
+        // A is square
+        const size_t n = std::sqrt(A.size());
+        std::vector<scalar_t> QQ(n * n, 0.0);
+        for (size_t i = 0; i < n; i++) QQ[i * n + i] = 1.0;
+        // initialize Q and R
+        std::vector<scalar_t> Q(n * n, 0.0);
+        for (size_t i = 0; i < n; i++) Q[i * n + i] = 1.0;
+        std::vector<scalar_t> R = Ak;
+        std::vector<scalar_t> temp(Q.size());
+        for (size_t i = 0; i < max_iter; i++) {
+            // reset Q and R, G gets reset inside qr_impl
+            for (size_t j = 0; j < n; j++) {
+                for (size_t k = 0; k < n; k++) {
+                    // probably a decent way to reset to a diagonal matrix
+                    Q[j * n + k] = static_cast<scalar_t>(k == j);
+                    R[j * n + k] = Ak[j * n + k];
+                }
+            }
+            // call QR decomposition
+            tinyqr::internal::qr_impl<scalar_t>(Q, R, n, tol);
+            tinyqr::internal::A_matmul_B_to_C<scalar_t>(R, Q, Ak, n);
+            // overwrite QQ in place
+            size_t p = 0;
+            for (size_t j = 0; j < n; j++) {
+                for (size_t k = 0; k < n; k++) {
+                    temp[p] = 0;
+                    for (size_t l = 0; l < n; l++) {
+                        temp[p] += QQ[l * n + k] * Q[j * n + l];
+                    }
+                    p++;
+                }
+            }
+            // write to A colwise - i.e. directly
+            for (size_t k = 0; k < QQ.size(); k++) {
+                QQ[k] = temp[k];
+            }
+        }
+        // diagonal elements of Ak are eigenvalues - we can just shuffle elements of A
+        // and resize
+        for (size_t i = 1; i < n; i++) {
+            Ak[i] = Ak[i * n + i];
+        }
+        Ak.resize(n);
+        return {Ak, QQ};
+    }
+}  // namespace tinyqr
+
+
 // only for the stopwatch code
 #include <chrono>  // NOLINT [build/c++11] (this is not a Google project)
 #include <type_traits>
@@ -1430,7 +1578,7 @@ template <typename scalar_t>
                                   scalar_t &stpmin,               // NOLINT
                                   scalar_t &stpmax, int &info) {  // NOLINT
   info = 0;
-  bool bound = false;
+  bool bound;
 
   // Check the input parameters for errors.
   if ((brackt & ((stp <= std::min<scalar_t>(stx, sty)) ||
@@ -1441,8 +1589,8 @@ template <typename scalar_t>
 
   scalar_t sgnd = dp * (dx / fabs(dx));
   scalar_t stpf = 0;
-  scalar_t stpc = 0;
-  scalar_t stpq = 0;
+  scalar_t stpc;
+  scalar_t stpq;
 
   if (fp > fx) {
     info = 1;
@@ -1790,9 +1938,8 @@ namespace nlsolver {
 template <typename scalar_t = double>
 inline scalar_t max_abs_vec(const std::vector<scalar_t> &x) {
   auto result = std::abs(x[0]);
-  scalar_t temp = 0;
   for (size_t i = 1; i < x.size(); i++) {
-    temp = std::abs(x[i]);
+    scalar_t temp = std::abs(x[i]);
     if (result < temp) {
       result = temp;
     }
@@ -1931,7 +2078,7 @@ inline void shrink(simplex<scalar_t> &current_simplex, const size_t best,
   }
   // skip the best point - this uses separate loops, so we do not have to do
   // extra work (e.g. check i == best) which could lead to a branch
-  // misprediction
+  // mis-prediction
   for (size_t i = best + 1; i < current_simplex.size(); i++) {
     for (size_t j = 0; j < best; j++) {
       // TODO(JSzitas): SIMD Candidate
@@ -2091,7 +2238,7 @@ class NelderMead {
     std::vector<scalar_t> temp_expand(x.size());
     std::vector<scalar_t> temp_contract(x.size());
 
-    scalar_t ref_score = 0, exp_score = 0, cont_score = 0, fun_std_err = 0;
+    scalar_t ref_score, exp_score, cont_score, fun_std_err;
     // simplex iteration
     while (true) {
       // find best, worst and second worst scores
@@ -2318,12 +2465,10 @@ class DE {
       scores[i] = f_multiplier * this->f(agents[i]);
     }
     size_t function_calls_used = agents.size();
-    scalar_t score = 0;
     size_t iter = 0;
     size_t best_id = 0, val_no_change = 0;
-    bool not_updated = true;
     while (true) {
-      not_updated = true;
+      bool not_updated = true;
       // track how good the solutions are
       for (size_t i = 0; i < scores.size(); i++) {
         if (scores[i] < scores[best_id]) {
@@ -2356,7 +2501,7 @@ class DE {
                           this->crossover_prob, this->differential_weight,
                           this->generator);
         // evaluate proposal
-        score = f_multiplier * f(proposal_temp);
+        const scalar_t score = f_multiplier * f(proposal_temp);
         function_calls_used++;
         // if score is better than previous score, update agent
         if (score < scores[i]) {
@@ -2440,9 +2585,8 @@ class PSO {
   [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     std::vector<scalar_t> lower(x.size());
     std::vector<scalar_t> upper(x.size());
-    scalar_t temp = 0;
     for (size_t i = 0; i < x.size(); i++) {
-      temp = std::abs(x[i]);
+      scalar_t temp = std::abs(x[i]);
       lower[i] = -temp;
       upper[i] = temp;
     }
@@ -2453,9 +2597,8 @@ class PSO {
   [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
     std::vector<scalar_t> lower(x.size());
     std::vector<scalar_t> upper(x.size());
-    scalar_t temp = 0;
     for (size_t i = 0; i < x.size(); i++) {
-      temp = std::abs(x[i]);
+      scalar_t temp = std::abs(x[i]);
       lower[i] = -temp;
       upper[i] = temp;
     }
@@ -2511,7 +2654,7 @@ class PSO {
       iter++;
     }
   }
-  // for repeated initializations we will init solver with new bounds
+  // for repeated initializations we will initialize solver with new bounds
   void init_solver_state(const std::vector<scalar_t> &lower,
                          const std::vector<scalar_t> &upper) {
     this->n_dim = lower.size();
@@ -2528,11 +2671,10 @@ class PSO {
       }
       this->particle_best_positions[i] = std::vector<scalar_t>(this->n_dim);
     }
-    scalar_t temp = 0;
     for (size_t i = 0; i < n_particles; i++) {
       for (size_t j = 0; j < this->n_dim; j++) {
         // update velocities and positions
-        temp = std::abs(upper[j] - lower[j]);
+        scalar_t temp = std::abs(upper[j] - lower[j]);
         this->particle_positions[i][j] =
             lower[j] + ((upper[j] - lower[j]) * this->generator());
         if constexpr (Type == Vanilla) {
@@ -2555,7 +2697,7 @@ class PSO {
         // update current velocity for current particle - inertia update
         this->particle_velocities[i][j] =
             (this->inertia * this->particle_velocities[i][j]) +
-            // cognitive update (moving more if futher away from 'best' position
+            // cognitive update (moving more if further away from 'best' position
             // of particle )
             this->cognitive_coef * r_p *
                 (particle_positions[i][j] - particle_positions[i][j]) +
@@ -2608,16 +2750,15 @@ class PSO {
   }
   template <const bool minimize = true>
   void update_best_positions() {
-    scalar_t temp = 0;
     size_t best_index = 0;
     constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     bool update_happened = false;
     for (size_t i = 0; i < this->n_particles; i++) {
-      temp = f_multiplier * f(particle_positions[i]);
+      scalar_t temp = f_multiplier * f(particle_positions[i]);
       this->f_evals++;
       if (temp < this->swarm_best_value) {
         this->swarm_best_value = temp;
-        // save update of swarm best position for after the loop so we do not
+        // save update of swarm best position for after the loop, so we do not
         // by chance do many copies here
         best_index = i;
         update_happened = true;
@@ -2753,9 +2894,8 @@ class NelderMeadPSO {
     // compute implied upper and lower bounds
     std::vector<scalar_t> lower(n_dim);
     std::vector<scalar_t> upper(n_dim);
-    scalar_t temp = 0;
     for (size_t i = 0; i < n_dim; i++) {
-      temp = std::abs(x[i]);
+      scalar_t temp = std::abs(x[i]);
       lower[i] = -temp;
       upper[i] = temp;
     }
@@ -2767,9 +2907,8 @@ class NelderMeadPSO {
     // compute implied upper and lower bounds
     std::vector<scalar_t> lower(n_dim);
     std::vector<scalar_t> upper(n_dim);
-    scalar_t temp = 0;
     for (size_t i = 0; i < n_dim; i++) {
-      temp = std::abs(x[i]);
+      scalar_t temp = std::abs(x[i]);
       lower[i] = -temp;
       upper[i] = temp;
     }
@@ -2904,11 +3043,10 @@ class NelderMeadPSO {
       }
     }
     // the rest according to PSO
-    scalar_t temp = 0;
     for (i = nm_particles; i < n_particles; i++) {
       for (size_t j = 0; j < n_dim; j++) {
         // update velocities and positions
-        temp = std::abs(upper[j] - lower[j]);
+        scalar_t temp = std::abs(upper[j] - lower[j]);
         this->particle_positions[i][j] =
             lower[j] + ((upper[j] - lower[j]) * generator());
         this->particle_velocities[i][j] = -temp + (generator() * temp);
@@ -3602,14 +3740,13 @@ class BFGS {
 namespace nlsolver::experimental {
 // TODO(JSzitas): WIP
 template <typename Callable, typename RNG, typename scalar_t = double>
-class CMAES {
+class [[maybe_unused]] CMAES {
  private:
   Callable &f;
   RNG &generator;
-
  public:
   // constructor
-  CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator) {}
+  [[maybe_unused]] CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator) : f(f), generator(generator) {}
   // minimize interface
   [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
@@ -3621,7 +3758,7 @@ class CMAES {
 
  private:
   template <const bool minimize = true>
-  void solve(std::vector<scalar_t> &x) {
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
     const size_t n = x.size();
     size_t la = std::ceil(4 + round(3 * log(n)));
     const size_t mu = std::floor(la / 2);
