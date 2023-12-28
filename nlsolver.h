@@ -2525,6 +2525,15 @@ static inline scalar_t rnorm(RNG &generator) {
   return sqrt(-2 * log(generator())) * cos(2 * pi_ * generator());
 }
 
+template <typename scalar_t, typename RNG, typename RandomIt>
+static inline void rnorm(RNG &generator, RandomIt first, RandomIt last) {
+  // this is not a particularly good generator, but it is 'good enough' for
+  // our purposes.
+  for(;first != last; ++first) {
+      (*first) = rnorm<scalar_t, RNG>(generator);
+  }
+}
+
 enum PSOType { Vanilla, Accelerated };
 
 template <typename Callable, typename RNG, typename scalar_t = double,
@@ -3740,13 +3749,22 @@ class BFGS {
 namespace nlsolver::experimental {
 // TODO(JSzitas): WIP
 template <typename Callable, typename RNG, typename scalar_t = double>
-class [[maybe_unused]] CMAES {
+class CMAES {
  private:
   Callable &f;
   RNG &generator;
+  const scalar_t m_step;
+  const size_t max_iter;
+  const scalar_t condition, x_delta, f_delta;
  public:
   // constructor
-  [[maybe_unused]] CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator) : f(f), generator(generator) {}
+  CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator, const scalar_t m_step,
+                                 const size_t max_iter = 1000,
+                                 const scalar_t condition = 1e14,
+                                 const scalar_t x_delta = 1e-7,
+                                 const scalar_t f_delta = 1e-9) : f(f),
+    generator(generator), m_step(m_step), max_iter(max_iter), condition(condition),
+    x_delta(x_delta), f_delta(f_delta) {}
   // minimize interface
   [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
     return this->solve<true>(x);
@@ -3762,8 +3780,7 @@ class [[maybe_unused]] CMAES {
     const size_t n = x.size();
     size_t la = std::ceil(4 + round(3 * log(n)));
     const size_t mu = std::floor(la / 2);
-    std::vector<scalar_t> w(mu, 0.0);
-    // TVarVector w = TVarVector::Zero(mu);
+    std::vector<scalar_t> w(mu);
     for (size_t i = 0; i < mu; i++) {
       w[i] = std::log(static_cast<scalar_t>(mu) + 1 / 2) -
              log(static_cast<double>(i) + 1);
@@ -3786,78 +3803,119 @@ class [[maybe_unused]] CMAES {
         1. + cs + 2. * std::max(0., sqrt((mu_eff - 1.) / (n + 1.)) - 1.);
     const scalar_t chi = sqrt(n) * (1. - 1. / (4. * n) + 1. / (21. * n * n));
     const scalar_t hsig_thr = (1.4 + 2 / (n + 1.)) * chi;
-
     std::vector<scalar_t> pc(n, 0.0), ps(n, 0.0);
-    // these are technically matrices
+    // these are technically matrices, but we probably only need to allocate C here
     std::vector<scalar_t> B(n * n, 0.0), D(n * n, 0.0), C(n * n, 0.0);
     for (size_t i = 0; i < n; i++) {
       B[i + i * n] = 1.0;
       C[i + i * n] = 1.0;
       D[i + i * n] = 1.0;
     }
-    return solver_status<scalar_t>(1, 1, 1);
-    /*
-    scalar_t sigma = m_stepSize;
-    TVector xmean = x0;
-    TVector zmean = TVector::Zero(n);
-    TMatrix arz(n, la);
-    TMatrix arx(n, la);
-    TVarVector costs(la);
-    Scalar prevCost = objFunc.value(x0);
-    // CMA-ES Main Loop
+    scalar_t sigma = m_step;
+    std::vector<scalar_t> x_mean = x;
+    std::vector<scalar_t> z_mean(n, 0.0);
+    std::vector<scalar_t> costs(la);
+    scalar_t current_value = this->f(x);
     size_t eigen_last_eval = 0;
-    size_t eigen_next_eval = std::max<Scalar>(1, 1/(10*n*(c1+cmu)));
-    this->m_current.reset();
-    do {
+    size_t eigen_next_eval = std::max<size_t>(1, static_cast<size_t>(1/(10*n*(c1+cmu))));
+    std::vector<scalar_t> particles_z(n*la);
+    // this is a std::vector<std::vector<scalar_t>> only because of how the interface to f is
+    std::vector<scalar_t> particles_x(n*la);
+    // take iterator type and use it in the labmda
+    size_t f_evals = 1;
+    using ItType = decltype(particles_x.begin());
+    std::vector<scalar_t> temp_eval_vec = x;
+    // set up a lambda to adapt the interface, and to allow us to keep track of function evaluations
+    auto f_lam = [&](ItType first, ItType last) {
+        size_t p = 0;
+        // copy values over to temporary
+        for(;first != last; ++first) {
+            temp_eval_vec[p++] = *first;
+        }
+        f_evals++;
+        // run evaluation on temporary
+        return this->f(temp_eval_vec);
+    };
+    size_t iter = 0;
+    // run main loop
+    while(true) {
+        // update Z particles
+        rnorm(this->generator, particles_z.begin(), particles_z.end());
       for (int k = 0; k < la; ++k) {
-        arz.col(k) = normDist(n);
-        arx.col(k) = xmean + sigma * B*D*arz.col(k);
-        costs[k] = objFunc(arx.col(k));
+        //arz.col(k) = rnorm(this->generator, particles.begin(), particles.end());   //normDist(n);
+        // generate particles using current means, sigma and projection
+        for(size_t j = 0; j < n; j++) {
+            particles_x[k * n + j] = x_mean[j] + sigma; //* ;
+        }
+        //arx.col(k) = x_mean + sigma * B*D*arz.col(k);
+        costs[k] = f_lam(particles_x.begin() + k * n, particles_x.end() + k * n);//this->f(arx.col(k));
       }
       std::vector<size_t> indices = index_partial_sort(costs, mu);
-      xmean = TVector::Zero(n);
-      zmean = TVector::Zero(n);
+      // reset x_mean and z_mean
+      std::fill(x_mean.begin(), x_mean.end(), 0.0);
+      std::fill(z_mean.begin(), z_mean.end(), 0.0);
       for (int k = 0; k < mu; k++) {
-        zmean += w[k]*arz.col(indices[k]);
-        xmean += w[k]*arx.col(indices[k]);
+          for(size_t j = 0; j <n; j++) {
+              z_mean[j] += w[k] * particles_z[indices[k]*n + j];
+              x_mean[j] += w[k] * particles_x[indices[k]*n + j];
+          }
+        //z_mean += w[k] * particles_z arz.col(indices[k]);
+        //x_mean += w[k]*arx.col(indices[k]);
       }
-      // Update evolution paths
-      ps = (1. - cs)*ps + sqrt(cs*(2. - cs)*mu_eff) * B*zmean;
-      Scalar hsig = (ps.norm()/sqrt(pow(1 - (1. - cs), (2 *
-    (this->m_current.iterations + 1)))) < hsig_thr) ? 1.0 : 0.0; pc = (1. -
-    cc)*pc + hsig*sqrt(cc*(2. - cc)*mu_eff)*(B*D*zmean);
+      // Update evolution paths using projection
+      ps = (1. - cs)*ps + sqrt(cs*(2. - cs)*mu_eff) * B * z_mean;
+      // this is nasty, surely we can make it a bit nicer
+      scalar_t hsig = (ps.norm()/sqrt(pow(1 - (1. - cs), (2 *
+        (iter + 1)))) < hsig_thr) ? 1.0 : 0.0; pc = (1. -
+        cc)*pc + hsig*sqrt(cc*(2. - cc)*mu_eff)*(B*D*z_mean);
+
       // Adapt covariance matrix
       C = (1 - c1 - cmu)*C
           + c1*(pc*pc.transpose() + (1 - hsig)*cc*(2 - cc)*C);
       for (int k = 0; k < mu; ++k) {
-        TVector temp = B*D*arz.col(k);
-        C += cmu*w(k)*temp*temp.transpose();
+        // this should not get reallocated all the time, this is matrix * matrix * some vector,
+        // effectively reducing us to a vector, but B*D should be trivial to calculate ahead of time
+        // plus the D matrix should be a diagonal matrix (eigenvalues only) so why use full
+        // matrix multiplies
+        //TODO(JSzitas):
+        // we can actually cache this from computing the projection from before
+        //TVector temp = B*D*arz.col(k);
+        // the product temp * temp' can probably be avoided altogether seeing we are writing to a matrix
+        //C += cmu * w[k] * temp * temp.transpose();
       }
-      sigma = sigma * exp((cs/ds) * ((ps).norm()/chi - 1.));
-
-      ++Super::m_current.iterations;
-      if ((Super::m_current.iterations - eigen_last_eval) == eigen_next_eval) {
-        // Update B and D
-        eigen_last_eval = Super::m_current.iterations;
-        Eigen::SelfAdjointEigenSolver<THessian> eigenSolver(C);
-        B = eigenSolver.eigenvectors();
-        D.diagonal() = eigenSolver.eigenvalues().array().sqrt();
+      sigma *= exp((cs/ds) * ((ps).norm()/chi - 1.));
+      // run new evaluations
+      if ((iter - eigen_last_eval) == eigen_next_eval) {
+        // Update B and D by running eigensolver
+        eigen_last_eval = iter;
+        auto [D,B] = tinyqr::qr_decomposition(C);
+        // take sqrt of eigenvalues
+        //Eigen::SelfAdjointEigenSolver<THessian> eigenSolver(C);
+        //B = eigenSolver.eigenvectors();
+        //D.diagonal() = eigenSolver.eigenvalues().array().sqrt();
       }
-      Super::m_current.condition = D.diagonal().maxCoeff() /
-    D.diagonal().minCoeff(); Super::m_current.xDelta = (xmean - x0).norm(); x0 =
-    xmean; Super::m_current.fDelta = fabs(costs[indices[0]] - prevCost);
-      prevCost = costs[indices[0]];
-      if (fabs(costs[indices[0]] - costs[indices[mu-1]]) < 1e-6) {
-        sigma = sigma * exp(0.2+cs/ds);
+      // condition number, useful for convergence - ratio of largest and smallest eigenvalue
+      const scalar_t current_condition = D[0]/D.back();
+      //Super::m_current.condition = D.diagonal().maxCoeff() / D.diagonal().minCoeff();
+      x = x_mean;
+      // compute difference in best value and difference in coefficients,
+      // useful for checking convergence
+      const scalar_t current_f_delta = std::abs(costs[indices[0]] - current_value);
+      const scalar_t current_x_delta = (x_mean - x).norm();
+      current_value = costs[indices[0]];
+      // if all good solutions are becoming too similar, increase variance
+      if (std::abs(costs[indices[0]] - costs[indices[mu-1]]) < 1e-6) {
+        sigma *= exp(0.2 + cs / ds);
       }
-      Super::m_status = checkConvergence(this->m_stop, this->m_current);
-    } while (objFunc.callback(this->m_current, x0) && (this->m_status ==
-    Status::Continue));
-    // Return the best evaluated solution
-    x0 = xmean;
-    m_stepSize = sigma;
-*/
+      if(iter >= this->max_iter || current_condition > this->condition ||
+         current_f_delta < this->f_delta || current_x_delta < this->x_delta) {
+            x = x_mean;
+            m_step = sigma;
+            return solver_status<scalar_t>(current_value, iter, f_evals);
+    }
+    iter++;
   }
+}
 };
 }  // namespace nlsolver::experimental
 
