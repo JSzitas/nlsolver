@@ -22,7 +22,6 @@ using nlsolver::ConjugatedGradientDescent;
 using nlsolver::DE;
 using nlsolver::GradientDescent;
 using nlsolver::NelderMead;
-using nlsolver::NelderMeadPSO;
 using nlsolver::PSO;
 using nlsolver::SANN;
 // helper definition for GDType
@@ -30,6 +29,8 @@ using GDType = nlsolver::GradientStepType;
 using nlsolver::BFGS;
 
 // experimental solvers
+using nlsolver::experimental::LevenbergMarquardt;
+using nlsolver::experimental::NelderMeadPSO;
 
 // RNG
 using nlsolver::rng::xorshift;
@@ -72,6 +73,20 @@ struct std_MT {
 };
  */
 
+template <typename T>
+void run_solver(T &solver, std::vector<double> init = {2, 5}) {
+  auto de_res = solver.minimize(init);
+  de_res.print();
+  print_vector(init);
+}
+template <typename T>
+void run_solver(T &solver, std::vector<double> lower, std::vector<double> upper,
+                std::vector<double> init = {2, 5}) {
+  auto de_res = solver.minimize(init, lower, upper);
+  de_res.print();
+  print_vector(init);
+}
+
 int main() {
   // define problem functor - in our case a variant of the rosenbrock function
   Rosenbrock prob;
@@ -95,15 +110,8 @@ int main() {
   };
   auto nm_solver_lambda =
       NelderMead<decltype(RosenbrockLambda), double>(RosenbrockLambda);
-  // initialize function arguments
-  nm_init = {2, 7};
-  // nm_init[0] = 2;
-  // nm_init[1] = 7;
-  auto nm_res_lambda = nm_solver_lambda.minimize(nm_init);
-  // check solver status
-  nm_res_lambda.print();
-  // and estimated function parameters
-  print_vector(nm_init);
+  // repeat with lambda function, using a simple wrapper defined above:
+  run_solver(nm_solver_lambda, {2, 7});
 
   // use recombination strategy
   using DEStrat = nlsolver::RecombinationStrategy;
@@ -114,12 +122,7 @@ int main() {
   // again initialize solver, this time also with the RNG
   auto de_solver =
       DE<Rosenbrock, xorshift<double>, double, DEStrat::best>(prob, gen);
-
-  std::vector<double> de_init = {2, 7};
-
-  auto de_res = de_solver.minimize(de_init);
-  de_res.print();
-  print_vector(de_init);
+  run_solver(de_solver, {2, 7});
 
   std::cout << "Particle Swarm Optimization with xoshiro: " << std::endl;
   // we also have a xoshiro generator
@@ -131,22 +134,12 @@ int main() {
   auto pso_solver = PSO<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
-  std::vector<double> pso_init = {3, 3};
-  auto pso_res = pso_solver.minimize(pso_init);
-  pso_res.print();
-  print_vector(pso_init);
+  run_solver(pso_solver, {3, 3});
   std::cout << "Particle Swarm Optimization with xoshiro (and bounds): "
             << std::endl;
   // this tends to be much worse than not specifying bounds for PSO - so
   // we heavily recommend those:
-  pso_init[0] = 0;
-  pso_init[1] = 0;
-  std::vector<double> pso_lower = {-1, -1};
-  std::vector<double> pso_upper = {1, 1};
-
-  pso_res = pso_solver.minimize(pso_init, pso_lower, pso_upper);
-  pso_res.print();
-  print_vector(pso_init);
+  run_solver(pso_solver, {-1, -1}, {1, 1}, {0, 0});
   std::cout << "Accelerated Particle Swarm Optimization with xoshiro: "
             << std::endl;
   // we also have an accelerated version - we reset the RNG as well.
@@ -156,10 +149,7 @@ int main() {
                                                                      xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
-  std::vector<double> apso_init = {3, 3};
-  auto apso_res = apso_solver.minimize(apso_init);
-  apso_res.print();
-  print_vector(apso_init);
+  run_solver(apso_solver, {3, 3});
 
   std::cout << "Simulated Annealing with xoshiro: " << std::endl;
   // we also have an accelerated version - we reset the RNG as well.
@@ -167,10 +157,7 @@ int main() {
   auto sann_solver = SANN<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
-  std::vector<double> sann_init = {3, 3};
-  auto sann_res = sann_solver.minimize(sann_init);
-  sann_res.print();
-  print_vector(sann_init);
+  run_solver(sann_solver, {5, 5});
 
   std::cout << "NelderMead-PSO hybrid with xoshiro: " << std::endl;
   // we also have an accelerated version - we reset the RNG as well.
@@ -179,27 +166,18 @@ int main() {
       NelderMeadPSO<Rosenbrock, xoshiro<double>, double>(prob, xos_gen);
   // set initial state - if no bounds are given, default initial parameters are
   // taken roughly as the scale of the parameter space
-  std::vector<double> nm_pso_init = {3, 3};
-  auto nm_pso_res = nm_pso_solver.minimize(nm_pso_init);
-  nm_pso_res.print();
-  print_vector(nm_pso_init);
+  run_solver(nm_pso_solver, {3, 3});
 
   std::cout << "Gradient Descent without line-search using fixed step size: "
             << std::endl;
   auto gd_solver_fixed =
       GradientDescent<Rosenbrock, double, GDType::Fixed>(prob, 0.0005);
-  std::vector<double> gd_init_fixed = {2, 2};
-  auto gd_res_fixed = gd_solver_fixed.minimize(gd_init_fixed);
-  gd_res_fixed.print();
-  print_vector(gd_init_fixed);
+  run_solver(gd_solver_fixed, {2, 2});
 
   std::cout << "Gradient Descent with line-search: " << std::endl;
   auto gd_solver_linesearch =
       GradientDescent<Rosenbrock, double, GDType::Linesearch>(prob);
-  std::vector<double> gd_init_linesearch = {2, 2};
-  auto gd_res_linesearch = gd_solver_linesearch.minimize(gd_init_linesearch);
-  gd_res_linesearch.print();
-  print_vector(gd_init_linesearch);
+  run_solver(gd_solver_linesearch, {2, 2});
 
   std::cout
       << "Gradient Descent without line-search using big steps,"
@@ -207,25 +185,20 @@ int main() {
       << std::endl;
   auto gd_solver_bigstep =
       GradientDescent<Rosenbrock, double, GDType::Bigstep, 5, true>(prob);
-  std::vector<double> gd_init_bigstep = {2, 2};
-  auto gd_res_bigstep = gd_solver_bigstep.minimize(gd_init_bigstep);
-  gd_res_bigstep.print();
-  print_vector(gd_init_bigstep);
+  run_solver(gd_solver_bigstep, {2, 2});
 
   std::cout << "Conjugated Gradient Descent (always requires linesearch)"
             << std::endl;
   auto cgd_solver = ConjugatedGradientDescent<Rosenbrock, double>(prob);
-  std::vector<double> cgd_init = {2, 2};
-  auto cgd_res = cgd_solver.minimize(cgd_init);
-  cgd_res.print();
-  print_vector(cgd_init);
+  run_solver(cgd_solver, {2, 2});
 
   std::cout << "BFGS (always requires linesearch)" << std::endl;
   auto bfgs_solver = BFGS<Rosenbrock, double>(prob);
-  std::vector<double> bfgs_init = {2, 2};
-  auto bfgs_res = bfgs_solver.minimize(bfgs_init);
-  bfgs_res.print();
-  print_vector(bfgs_init);
+  run_solver(bfgs_solver, {2, 2});
+
+  std::cout << "LevenbergMarquardt (always requires hessian)" << std::endl;
+  auto lm_solver = LevenbergMarquardt<Rosenbrock, double>(prob);
+  run_solver(lm_solver, {2, 2});
 
   return 0;
 }

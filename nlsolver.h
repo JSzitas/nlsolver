@@ -39,200 +39,12 @@
 #include <utility>
 #include <vector>
 
-namespace tinyqr::internal {
-    template <typename scalar_t>
-    std::tuple<scalar_t, scalar_t> givens_rotation(scalar_t a, scalar_t b) {
-        if (std::abs(b) <= std::numeric_limits<scalar_t>::min()) {
-            return std::make_tuple(1.0, 0.0);
-        } else {
-            if (std::abs(b) > std::abs(a)) {
-                const scalar_t r = a / b;
-                const scalar_t s = 1.0 / sqrt(1.0 + std::pow(r, 2));
-                return std::make_tuple(s * r, s);
-            } else {
-                const scalar_t r = b / a;
-                const scalar_t c = 1.0 / sqrt(1.0 + std::pow(r, 2));
-                return std::make_tuple(c, c * r);
-            }
-        }
-    }
-    template <typename scalar_t>
-    inline void A_matmul_B_to_C(std::vector<scalar_t> &A, std::vector<scalar_t> &B,
-                                std::vector<scalar_t> &C, const size_t ncol) {
-        for (size_t k = 0; k < ncol; k++) {
-            for (size_t l = 0; l < ncol; l++) {
-                scalar_t accumulator = 0.0;
-                for (size_t m = 0; m < ncol; m++) {
-                    accumulator += A[m * ncol + k] * B[l * ncol + m];
-                }
-                C[l * ncol + k] = accumulator;
-            }
-        }
-    }
-// this is the implementation of QR decomposition - this does not get exposed,
-// only the nice(r) facades do
-    template <typename scalar_t>
-    void qr_impl(std::vector<scalar_t> &Q, std::vector<scalar_t> &R, const size_t n,
-                 const scalar_t tol) {
-        for (size_t j = 0; j < n; j++) {
-            for (size_t i = n - 1; i > j; i--) {
-                // using tuples and structured bindings should make this fairly ok
-                // performance wise
-                const auto [c, s] = givens_rotation(R[(j * n) + (i - 1)], R[j * n + i]);
-                // you can make the matrix multiplication implicit, as the givens rotation
-                // only impacts a moving 2x2 block
-                for (size_t k = 0; k < n; ++k) {
-                    // first do G'R - keep in mind this is transposed
-                    size_t upper = k * n + (i - 1);
-                    size_t lower = k * n + i;
-                    scalar_t temp_1 = R[upper];
-                    scalar_t temp_2 = R[lower];
-                    // carry out the multiplies on required elements
-                    R[upper] = c * temp_1 + s * temp_2;
-                    R[lower] = -s * temp_1 + c * temp_2;
-                    // reuse temporaries from above to
-                    // QG - note that this is not transposed
-                    upper = i * n + k;
-                    lower = (i - 1) * n + k;
-                    temp_1 = Q[upper];
-                    temp_2 = Q[lower];
-                    // again, NOT transposed, so s and -s are flipped
-                    Q[upper] = c * temp_1 - s * temp_2;
-                    Q[lower] = s * temp_1 + c * temp_2;
-                }
-            }
-        }
-        // clean up R - particularly under the diagonal
-        for (auto &val : R) {
-            val = std::abs(val) < tol ? 0.0 : val;
-        }
-    }
-}  // namespace tinyqr::internal
-namespace tinyqr {
-    template <typename scalar_t>
-    struct QR {
-        std::vector<scalar_t> Q;
-        std::vector<scalar_t> R;
-    };
-
-    template <typename scalar_t>
-    [[maybe_unused]] QR<scalar_t> qr_decomposition(const std::vector<scalar_t> &A,
-                                                   const scalar_t tol = 1e-8) {
-        const size_t n = std::sqrt(A.size());
-        // initialize Q and R
-        std::vector<scalar_t> Q(n * n, 0.0);
-        // Q is an identity matrix
-        for (size_t i = 0; i < n; i++) Q[i * n + i] = 1.0;
-        std::vector<scalar_t> R = A;
-        tinyqr::internal::qr_impl<scalar_t>(Q, R, n, tol);
-        return {Q, R};
-    }
-
-    template <typename scalar_t>
-    struct eigendecomposition {
-        std::vector<scalar_t> eigenvals;
-        std::vector<scalar_t> eigenvecs;
-    };
-
-    template <typename scalar_t>
-    [[maybe_unused]] eigendecomposition<scalar_t> qr_algorithm(
-            const std::vector<scalar_t> &A, const size_t max_iter = 25,
-            const scalar_t tol = 1e-8) {
-        auto Ak = A;
-        // A is square
-        const size_t n = std::sqrt(A.size());
-        std::vector<scalar_t> QQ(n * n, 0.0);
-        for (size_t i = 0; i < n; i++) QQ[i * n + i] = 1.0;
-        // initialize Q and R
-        std::vector<scalar_t> Q(n * n, 0.0);
-        for (size_t i = 0; i < n; i++) Q[i * n + i] = 1.0;
-        std::vector<scalar_t> R = Ak;
-        std::vector<scalar_t> temp(Q.size());
-        for (size_t i = 0; i < max_iter; i++) {
-            // reset Q and R, G gets reset inside qr_impl
-            for (size_t j = 0; j < n; j++) {
-                for (size_t k = 0; k < n; k++) {
-                    // probably a decent way to reset to a diagonal matrix
-                    Q[j * n + k] = static_cast<scalar_t>(k == j);
-                    R[j * n + k] = Ak[j * n + k];
-                }
-            }
-            // call QR decomposition
-            tinyqr::internal::qr_impl<scalar_t>(Q, R, n, tol);
-            tinyqr::internal::A_matmul_B_to_C<scalar_t>(R, Q, Ak, n);
-            // overwrite QQ in place
-            size_t p = 0;
-            for (size_t j = 0; j < n; j++) {
-                for (size_t k = 0; k < n; k++) {
-                    temp[p] = 0;
-                    for (size_t l = 0; l < n; l++) {
-                        temp[p] += QQ[l * n + k] * Q[j * n + l];
-                    }
-                    p++;
-                }
-            }
-            // write to A colwise - i.e. directly
-            for (size_t k = 0; k < QQ.size(); k++) {
-                QQ[k] = temp[k];
-            }
-        }
-        // diagonal elements of Ak are eigenvalues - we can just shuffle elements of A
-        // and resize
-        for (size_t i = 1; i < n; i++) {
-            Ak[i] = Ak[i * n + i];
-        }
-        Ak.resize(n);
-        return {Ak, QQ};
-    }
-}  // namespace tinyqr
-
+#include "./tinyqr.h"
 
 // only for the stopwatch code
 #include <chrono>  // NOLINT [build/c++11] (this is not a Google project)
 #include <type_traits>
 
-namespace nlsolver::utils {
-/* graciously taken from: https://stackoverflow.com/a/61881422
- * this is quite convenient, because to time a block of code you simply call
- * the constructor, and when the block finishes it will be automatically
- * cleaned up (and that will give you the timing).
- */
-template <typename Resolution = std::chrono::duration<double, std::micro>>
-class [[maybe_unused]] Stopwatch {
-  typedef std::chrono::steady_clock Clock;
-
- private:
-  std::chrono::time_point<Clock> last;
-
- public:
-  void reset() noexcept { last = Clock::now(); }
-  Stopwatch() noexcept { reset(); }
-  auto operator()() const noexcept {  // returns time in Resolution
-    return Resolution(Clock::now() - last).count();
-  }
-  ~Stopwatch() {
-    std::cout << "This code took: " << (*this)() * 1e-6 << " seconds.\n";
-  }
-};
-// TODO(JSzitas): clean up
-template <typename scalar_t>
-[[maybe_unused]] void display_square_mat(const std::vector<scalar_t> &x) {
-  const size_t n_dim = std::sqrt(x.size());
-  for (size_t i = 0; i < n_dim; i++) {
-    for (size_t j = 0; j < n_dim; j++) {
-      std::cout << x[i + j * n_dim] << ",";
-    }
-    std::cout << std::endl;
-  }
-}
-template <typename T, const bool use_newline = true>
-[[maybe_unused]] void display_vector(const T &x) {
-  for (size_t i = 0; i < x.size(); i++) {
-    std::cout << x[i] << ",";
-  }
-  if constexpr (use_newline) std::cout << std::endl;
-}
-};  // namespace nlsolver::utils
 // mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
 template <typename T>
@@ -274,6 +86,17 @@ template <typename T>
   for (int z = 0; z < f; z++) {
     s += (*x) * (*x);
     x++;
+  }
+  return std::sqrt(s);
+}
+template <typename T>
+[[maybe_unused]] inline T norm_diff(const T *x, const T *y, int f) {
+  T s = 0;
+  for (int z = 0; z < f; z++) {
+    T tmp = *x + *y;
+    s += tmp * tmp;
+    x++;
+    y++;
   }
   return std::sqrt(s);
 }
@@ -633,6 +456,56 @@ template <>
     x++;
   }
   return sqrt(result);
+}
+template <>
+[[maybe_unused]] inline float norm_diff<float>(const float *x, const float *y,
+                                               int f) {
+  float result = 0;
+  if (f > 7) {
+    __m256 d = _mm256_setzero_ps();
+    __m256 tmp = _mm256_setzero_ps();
+    for (; f > 7; f -= 8) {
+      tmp = _mm256_sub_ps(_mm256_loadu_ps(x), _mm256_loadu_ps(y));
+      d = _mm256_add_ps(d, _mm256_mul_ps(tmp, tmp));
+      x += 8;
+      y += 8;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_ps_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    float tmp = *x + *y;
+    result += tmp * tmp;
+    x++;
+    y++;
+  }
+  return std::sqrt(result);
+}
+template <>
+[[maybe_unused]] inline double norm_diff<double>(const double *x,
+                                                 const double *y, int f) {
+  double result = 0;
+  if (f > 3) {
+    __m256 d = _mm256_setzero_pd();
+    __m256 tmp = _mm256_setzero_pd();
+    for (; f > 3; f -= 4) {
+      tmp = _mm256_sub_pd(_mm256_loadu_pd(x), _mm256_loadu_pd(y));
+      d = _mm256_add_pd(d, _mm256_mul_pd(tmp, tmp));
+      x += 4;
+      y += 4;
+    }
+    // Sum all floats in dot register.
+    result += hsum256_pd_avx(d);
+  }
+  // Don't forget the remaining values.
+  for (; f > 0; f--) {
+    double tmp = *x + *y;
+    result += tmp * tmp;
+    x++;
+    y++;
+  }
+  return std::sqrt(result);
 }
 template <>
 [[maybe_unused]] inline void a_plus_b(float *a, const float *b, int f) {
@@ -1456,9 +1329,8 @@ void finite_difference_gradient(Callable &f, std::vector<scalar_t> &x,
 }
 
 template <typename Callable, typename scalar_t, const size_t accuracy = 0>
-[[maybe_unused]] void finite_difference_hessian(
-    Callable &f, std::vector<scalar_t> &x,  // NOLINT
-    std::vector<scalar_t> &hess) {
+void finite_difference_hessian(Callable &f, std::vector<scalar_t> &x,  // NOLINT
+                               std::vector<scalar_t> &hess) {
   constexpr scalar_t eps = std::numeric_limits<scalar_t>::epsilon() * 10e7;
   const size_t p = x.size();
   if constexpr (accuracy == 0) {
@@ -1557,7 +1429,7 @@ template <typename Callable, typename scalar_t, const size_t accuracy = 0>
     }
   }
 }
-};  // namespace nlsolver::finite_difference
+}  // namespace nlsolver::finite_difference
 
 namespace nlsolver::linesearch {
 template <typename scalar_t>
@@ -1932,7 +1804,7 @@ template <typename Callable, typename Grad, typename scalar_t = double>
          linesearch_temp, g);
   return alpha_;
 }
-};  // namespace nlsolver::linesearch
+}  // namespace nlsolver::linesearch
 
 namespace nlsolver {
 template <typename scalar_t = double>
@@ -2109,11 +1981,13 @@ template <typename scalar_t = double>
 struct solver_status {
   solver_status<scalar_t>(const scalar_t f_val, const size_t iter_used,
                           const size_t f_calls_used,
-                          const size_t grad_evals_used = 0)
+                          const size_t grad_evals_used = 0ul,
+                          const size_t hess_evals_used = 0ul)
       : f_value(f_val),
         iteration(iter_used),
         function_calls_used(f_calls_used),
-        gradient_evals_used(grad_evals_used) {}
+        gradient_evals_used(grad_evals_used),
+        hessian_evals_used(hess_evals_used) {}
   void print() const {
     std::cout << "Function calls used: " << this->function_calls_used
               << std::endl;
@@ -2122,11 +1996,16 @@ struct solver_status {
       std::cout << "Gradient evaluations used: " << this->gradient_evals_used
                 << std::endl;
     }
+    if (hessian_evals_used > 0) {
+      std::cout << "Hessian evaluations used: " << this->hessian_evals_used
+                << std::endl;
+    }
     std::cout << "With final function value of " << this->f_value << std::endl;
   }
-  std::tuple<size_t, size_t, scalar_t, size_t> get_summary() const {
+  std::tuple<size_t, size_t, scalar_t, size_t, size_t> get_summary() const {
     return std::make_tuple(this->function_calls_used, this->iteration,
-                           this->f_value, this->gradient_evals_used);
+                           this->f_value, this->gradient_evals_used,
+                           this->hessian_evals_used);
   }
   void add(const solver_status<scalar_t> &additional_runs) {
     auto other = additional_runs.get_summary();
@@ -2134,11 +2013,13 @@ struct solver_status {
     this->iteration += std::get<1>(other);
     this->f_value = std::get<2>(other);
     this->gradient_evals_used += std::get<3>(other);
+    this->hessian_evals_used += std::get<4>(other);
   }
 
  private:
   scalar_t f_value;
-  size_t iteration, function_calls_used, gradient_evals_used;
+  size_t iteration, function_calls_used, gradient_evals_used,
+      hessian_evals_used;
 };
 
 template <typename Callable, typename scalar_t = double>
@@ -2335,7 +2216,6 @@ class NelderMead {
           function_calls_used += current_simplex.size() - 1;
         }
       }
-      current_simplex.print();
     }
   }
 };
@@ -2529,8 +2409,8 @@ template <typename scalar_t, typename RNG, typename RandomIt>
 static inline void rnorm(RNG &generator, RandomIt first, RandomIt last) {
   // this is not a particularly good generator, but it is 'good enough' for
   // our purposes.
-  for(;first != last; ++first) {
-      (*first) = rnorm<scalar_t, RNG>(generator);
+  for (; first != last; ++first) {
+    (*first) = rnorm<scalar_t, RNG>(generator);
   }
 }
 
@@ -2706,8 +2586,8 @@ class PSO {
         // update current velocity for current particle - inertia update
         this->particle_velocities[i][j] =
             (this->inertia * this->particle_velocities[i][j]) +
-            // cognitive update (moving more if further away from 'best' position
-            // of particle )
+            // cognitive update (moving more if further away from 'best'
+            // position of particle )
             this->cognitive_coef * r_p *
                 (particle_positions[i][j] - particle_positions[i][j]) +
             // social update (moving more if further away from 'best' position
@@ -2853,6 +2733,900 @@ class SANN {
             best_val = current_val;
           }
         }
+      }
+      iter++;
+    }
+  }
+};
+enum GradientStepType {
+  Linesearch,
+  Fixed,
+  Bigstep,
+  Anneal,
+  PAGE
+  // Momentum
+};
+
+template <const size_t level>
+constexpr size_t bigstep_offset() {
+  if constexpr (level == 1) return 0;
+  if constexpr (level == 2) return 2;
+  if constexpr (level == 3) return 5;
+  if constexpr (level == 4) return 12;
+  if constexpr (level == 5) return 27;
+  if constexpr (level == 6) return 58;
+  if constexpr (level == 7) return 121;
+  return 0;
+}
+
+template <const size_t level>
+constexpr size_t bigstep_len() {
+  if constexpr (level == 1) return 2;
+  if constexpr (level == 2) return 3;
+  if constexpr (level == 3) return 7;
+  if constexpr (level == 4) return 15;
+  if constexpr (level == 5) return 31;
+  if constexpr (level == 6) return 63;
+  if constexpr (level == 7) return 127;
+  return 0;
+}
+template <typename Callable, typename scalar_t>
+struct fin_diff {
+  void operator()(Callable &f, std::vector<scalar_t> &x,
+                  std::vector<scalar_t> &gradient) {
+    nlsolver::finite_difference::finite_difference_gradient<Callable, scalar_t,
+                                                            1>(f, x, gradient);
+  }
+};
+template <typename Callable, typename scalar_t>
+struct fin_diff_h {
+  void operator()(Callable &f, std::vector<scalar_t> &x,
+                  std::vector<scalar_t> &hessian) {
+    nlsolver::finite_difference::finite_difference_hessian<Callable, scalar_t,
+                                                           1>(f, x, hessian);
+  }
+};
+template <typename Callable, typename scalar_t,
+          const GradientStepType step = GradientStepType::Fixed,
+          const size_t bigstep_level = 5,
+          const bool grad_norm_lipschitz_scaling = true,
+          typename Grad = fin_diff<Callable, scalar_t>>
+class GradientDescent {
+  Callable &f;
+  Grad g;
+  const size_t max_iter, minibatch, minibatch_prime;
+  const scalar_t grad_eps, alpha;
+  nlsolver::rng::xorshift<scalar_t> generator;
+  constexpr static std::array<scalar_t, 248> fixed_steps = {
+      2.9, 1.5,                                 // pattern length 2 => type 1
+      1.5, 4.9,  1.5,                           // type 2
+      1.5, 2.2,  1.5,  12.0, 1.5,  2.2,   1.5,  // type 3
+      1.4, 2.0,  1.4,  4.5,  1.4,  2.0,   1.4, 29.7, 1.4,  2.0, 1.4, 4.5,   1.4,
+      2.0, 1.4,  // type 4
+      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 8.2,  1.4,  2.0, 1.4, 3.9,   1.4,
+      2.0, 1.4,  72.3, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 8.2, 1.4,   2.0,
+      1.4, 3.9,  1.4,  2.0,  1.4,  // type 5
+      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 7.2,  1.4,  2.0, 1.4, 3.9,   1.4,
+      2.0, 1.4,  14.2, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 7.2, 1.4,   2.0,
+      1.4, 3.9,  1.4,  2.0,  1.4,  164.0, 1.4, 2.0,  1.4,  3.9, 1.4, 2.0,   1.4,
+      7.2, 1.4,  2.0,  1.4,  3.9,  1.4,   2.0, 1.4,  14.2, 1.4, 2.0, 1.4,   3.9,
+      1.4, 2.0,  1.4,  7.2,  1.4,  2.0,   1.4, 3.9,  1.4,  2.0, 1.4,  // type 6
+      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 7.2,  1.4,  2.0, 1.4, 3.9,   1.4,
+      2.0, 1.4,  12.6, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 7.2, 1.4,   2.0,
+      1.4, 3.9,  1.4,  2.0,  1.4,  23.5,  1.4, 2.0,  1.4,  3.9, 1.4, 2.0,   1.4,
+      7.2, 1.4,  2.0,  1.4,  3.9,  1.4,   2.0, 1.4,  12.6, 1.4, 2.0, 1.4,   3.9,
+      1.4, 2.0,  1.4,  7.2,  1.4,  2.0,   1.4, 3.9,  1.4,  2.0, 1.4, 370.0, 1.4,
+      2.0, 1.4,  3.9,  1.4,  2.0,  1.4,   7.2, 1.4,  2.0,  1.4, 3.9, 1.4,   2.0,
+      1.4, 12.6, 1.4,  2.0,  1.4,  3.9,   1.4, 2.0,  1.4,  7.2, 1.4, 2.0,   1.4,
+      3.9, 1.4,  2.0,  1.4,  23.5, 1.4,   2.0, 1.4,  3.9,  1.4, 2.0, 1.4,   7.5,
+      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 12.6, 1.4,  2.0, 1.4, 3.9,   1.4,
+      2.0, 1.4,  7.2,  1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4  // type 7
+  };
+  std::vector<scalar_t> search_direction, linesearch_temp, gradient_temp;
+
+ public:
+  explicit GradientDescent<Callable, scalar_t, step, bigstep_level,
+                           grad_norm_lipschitz_scaling, Grad>(
+      Callable &f, const scalar_t alpha = 1, const size_t max_iter = 500,
+      const scalar_t grad_eps = 1e-12, const size_t minibatch_b = 128,
+      const size_t minibatch_b_prime = 11,
+      Grad g = fin_diff<Callable, scalar_t>())
+      : f(f),
+        g(g),
+        max_iter(max_iter),
+        minibatch(minibatch_b),
+        minibatch_prime(minibatch_b_prime),
+        grad_eps(grad_eps),
+        alpha(alpha),
+        generator(nlsolver::rng::xorshift<scalar_t>()) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize interface
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
+    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0);
+    if constexpr (step == GradientStepType::Linesearch) {
+      // we need additional temporaries for linesearch
+      this->search_direction = std::vector<scalar_t>(n_dim, 0.0);
+      this->linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
+      this->gradient_temp = std::vector<scalar_t>(n_dim, 0.0);
+    }
+    scalar_t alpha_ = this->alpha;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
+    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    scalar_t max_grad_norm = 0;
+    // only necessary and interesting for PAGE
+    const scalar_t p = minibatch / (minibatch_prime + minibatch);
+    const scalar_t ratio = static_cast<scalar_t>(minibatch) /
+                           static_cast<scalar_t>(minibatch_prime);
+    // construct lambda that takes f and enables function evaluation counting
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    // compute gradient
+    g_lam(x, gradient);
+    while (true) {
+      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
+      max_grad_norm = std::max(max_grad_norm, grad_norm);
+      if (iter >= this->max_iter || grad_norm < grad_eps ||
+          std::isinf(grad_norm)) {
+        // evaluate at current parameters
+        scalar_t current_val = f_lam(x);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
+      }
+      if constexpr (step == GradientStepType::Linesearch) {
+        nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
+                                           this->search_direction.data(),
+                                           i_dim);
+        for (size_t i = 0; i < n_dim; i++) {
+          // this->search_direction[i] = f_multiplier * gradient[i];
+          this->gradient_temp[i] = gradient[i];
+        }
+        alpha_ = nlsolver::linesearch::more_thuente_search(
+            f_lam, x, this->gradient_temp, this->search_direction,
+            this->linesearch_temp, this->alpha, g_lam);
+      }
+      // do nothing - this is here just to make it more obvious
+      if constexpr (step == GradientStepType::Fixed) {
+      }
+      if constexpr (step == GradientStepType::Anneal) {
+        // update alpha using a cooling schedule
+        alpha_ = this->alpha / (1.0 + (static_cast<scalar_t>(iter) / max_iter));
+      }
+      if constexpr (step == GradientStepType::Bigstep) {
+        constexpr size_t offset = bigstep_offset<bigstep_level>();
+        constexpr size_t step_len = bigstep_len<bigstep_level>();
+        const size_t current_step = offset + iter % step_len;
+        if constexpr (bigstep_level == 0) {
+          alpha_ = ((current_step == 0) * (fixed_steps[current_step] - alpha)) +
+                   ((current_step != 0) * fixed_steps[current_step]);
+        }
+        if constexpr (bigstep_level != 0) {
+          alpha_ = fixed_steps[current_step];
+        }
+        if constexpr (grad_norm_lipschitz_scaling) {
+          alpha_ /= max_grad_norm;
+        }
+      }
+      // update parameters
+      alpha_ *= f_multiplier;
+      nlsolver::math::a_mult_scalar_add_b(gradient.data(), alpha_, x.data(),
+                                          i_dim);
+      if constexpr (step == GradientStepType::PAGE) {
+        for (size_t i = 0; i < n_dim; i++) prev_gradient[i] = gradient[i];
+      }
+      // compute gradient
+      g_lam(x, gradient);
+      if constexpr (step == GradientStepType::PAGE) {
+        if (generator() > p) {
+          // only do a small update where new gradient is old gradient
+          // + difference between gradients
+          nlsolver::math::a_minus_b_mult_scalar_add_c(
+              gradient.data(), prev_gradient.data(), ratio, gradient.data(),
+              i_dim);
+        }
+      }
+      iter++;
+    }
+  }
+};
+
+template <typename Callable, typename scalar_t,
+          typename Grad = fin_diff<Callable, scalar_t>>
+class ConjugatedGradientDescent {
+  Callable &f;
+  Grad g;
+  const size_t max_iter;
+  const scalar_t grad_eps, alpha;
+
+ public:
+  explicit ConjugatedGradientDescent<Callable, scalar_t, Grad>(
+      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
+      const size_t max_iter = 500, const scalar_t grad_eps = 5e-3,
+      const scalar_t alpha = 0.03)
+      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize interface
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
+    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
+    // we need additional temporaries for linesearch
+    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0);
+    std::vector<scalar_t> linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
+    scalar_t alpha_ = this->alpha;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
+    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    // construct lambda that takes f and enables function evaluation counting
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    g_lam(x, gradient);
+    // set search direction for linesearch
+    nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
+                                       search_direction.data(), i_dim);
+    while (true) {
+      // compute gradient
+      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
+      if (iter >= this->max_iter || grad_norm < grad_eps ||
+          std::isinf(grad_norm)) {
+        // evaluate at current parameters
+        scalar_t current_val = f_lam(x);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
+      }
+      alpha_ = nlsolver::linesearch::armijo_search(
+          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
+      // update parameters; x[i] += search_direction[i] * alpha_;
+      nlsolver::math::a_mult_scalar_add_b(search_direction.data(), alpha_,
+                                          x.data(), i_dim);
+      // recompute gradient, compute new search direction using conjugation
+      // first, compute gradient.dot(gradient) with existing gradient,
+      // then compute new gradient and compute the same, then compute their
+      // ratio
+      scalar_t denominator = math::dot(gradient.data(), gradient.data(), i_dim);
+      g_lam(x, gradient);
+      // figure out the numerator from new gradient
+      scalar_t numerator = math::dot(gradient.data(), gradient.data(), i_dim);
+      const scalar_t search_update = numerator / denominator;
+      // update search direction
+      nlsolver::math::a_mul_scalar(search_direction.data(), search_update,
+                                   i_dim);
+      nlsolver::math::a_mult_scalar_add_b(gradient.data(), f_multiplier,
+                                          search_direction.data(), i_dim);
+      iter++;
+    }
+  }
+};
+template <typename scalar_t>
+void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
+                            const std::vector<scalar_t> &step,
+                            const std::vector<scalar_t> &grad_diff,
+                            std::vector<scalar_t> &grad_diff_inv_hess,
+                            const scalar_t rho) {
+  // precompute temporaries needed in the hessian update
+  const size_t n_dim = grad_diff.size();
+  int i_dim = static_cast<int>(n_dim);
+  for (size_t i = 0; i < n_dim; i++) {
+    grad_diff_inv_hess[i] =
+        math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim), i_dim);
+  }
+  scalar_t denom =
+      math::dot(grad_diff.data(), grad_diff_inv_hess.data(), i_dim);
+  denom = (denom * rho) + 1.0;
+  // step is                               | n_dim x 1
+  // grad_diff_inv_hess is                 |     1 x n_dim
+  // => step * grad_diff_inv_hess is a     | n_dim x n_dim
+  // inv_hess_grad_diff is                 | n_dim x 1
+  // -> inv_hess_grad_diff * step.t() is a | n_dim x n_dim
+  // TODO(JSzitas): SIMD candidate
+  for (size_t j = 0; j < n_dim; j++) {
+    for (size_t i = 0; i < n_dim; i++) {
+      // do not replace this with -= or the whole thing falls apart
+      // because of operator order precedence - e.g. whole rhs would
+      // get evaluated before -=, whereas we want to do inv_hessian - first part
+      // + second part
+      inv_hessian[j * n_dim + i] =
+          inv_hessian[j * n_dim + i] -
+          // first part
+          rho * (step[i] * grad_diff_inv_hess[j] +
+                 grad_diff_inv_hess[i] * step[j] +
+                 // second part ->  multiply(step[i], denom * step[j])
+                 denom * step[i] * step[j]);
+    }
+    // inline intrinsics would be complicated, but the above can probably be
+    // reduced to something a lot faster that way
+  }
+}
+template <typename Callable, typename scalar_t = double,
+          typename Grad = fin_diff<Callable, scalar_t>>
+class BFGS {
+ private:
+  Callable &f;
+  Grad g;
+  // stopping
+  const size_t max_iter;
+  const scalar_t grad_eps, alpha;
+
+ public:
+  // constructor
+  explicit BFGS<Callable, scalar_t, Grad>(
+      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
+      const size_t max_iter = 100, const scalar_t grad_eps = 5e-3,
+      const scalar_t alpha = 1)
+      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
+
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    static_assert(minimize, "BFGS currently only supports minimization");
+    const size_t n_dim = x.size();
+    int i_dim = static_cast<int>(n_dim);
+    std::vector<scalar_t> inverse_hessian =
+        std::vector<scalar_t>(n_dim * n_dim);
+    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0),
+                          gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0),
+                          grad_update = std::vector<scalar_t>(n_dim, 0.0),
+                          s = std::vector<scalar_t>(n_dim, 0.0),
+                          linesearch_temp = std::vector<scalar_t>(n_dim, 0.0),
+                          grad_diff_inv_hess(n_dim), inv_hess_grad_diff(n_dim);
+    // initialize to identity matrix
+    for (size_t i = 0; i < n_dim; i++) inverse_hessian[i + (i * n_dim)] = 1.0;
+    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    g_lam(x, gradient);
+    // constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    scalar_t prev_grad_norm = 1e9;
+    scalar_t current_grad_norm = 1e8;
+    while (true) {
+      if (iter >= this->max_iter || current_grad_norm < grad_eps ||
+          std::abs(current_grad_norm - prev_grad_norm) < grad_eps ||
+          std::isinf(current_grad_norm)) {
+        // evaluate at current parameters
+        scalar_t current_val = f_lam(x);
+        return solver_status<scalar_t>(current_val, iter, function_calls_used,
+                                       grad_evals_used);
+      }
+      // update search direction vector using -inverse_hessian * gradient
+      for (size_t j = 0; j < n_dim; j++) {
+        search_direction[j] = -math::dot(inverse_hessian.data() + (j * n_dim),
+                                         gradient.data(), i_dim);
+      }
+      scalar_t phi = math::dot(gradient.data(), search_direction.data(), i_dim);
+      if ((phi > 0) || std::isnan(phi) || current_grad_norm > prev_grad_norm) {
+        std::fill(inverse_hessian.begin(), inverse_hessian.end(), 0.0);
+        // reset hessian approximation and search_direction
+        for (size_t i = 0; i < n_dim; i++) {
+          inverse_hessian[i + (i * n_dim)] = 1.0;
+          search_direction[i] = -gradient[i];
+        }
+      }
+      prev_gradient = gradient;
+      const scalar_t rate = nlsolver::linesearch::more_thuente_search(
+          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha,
+          g_lam);
+      // update parameters
+      nlsolver::math::a_mult_scalar_to_b(search_direction.data(), rate,
+                                         s.data(), i_dim);
+      nlsolver::math::a_plus_b(x.data(), s.data(), i_dim);
+      // we also need to compute the gradient at this new point
+      // update it by reference
+      g_lam(x, gradient);
+      prev_grad_norm = current_grad_norm;
+      current_grad_norm = nlsolver::math::norm(gradient.data(), i_dim);
+      // Update grad difference, rho and inverse hessian
+      nlsolver::math::a_minus_b_to_c(gradient.data(), prev_gradient.data(),
+                                     grad_update.data(), i_dim);
+      scalar_t rho = nlsolver::math::dot(grad_update.data(), s.data(), i_dim);
+      rho = 1 / rho;
+      // update inverse hessian using Sherman Morrisson
+      update_inverse_hessian(inverse_hessian, s, grad_update,
+                             grad_diff_inv_hess,  // inv_hess_grad_diff,
+                             rho);
+      iter++;
+    }
+  }
+};
+}  // namespace nlsolver
+
+namespace nlsolver::experimental {
+// TODO(JSzitas): These probably belong in math
+template <typename scalar_t>
+void cholesky(std::vector<scalar_t> &A) {
+  const auto n = static_cast<size_t>(std::sqrt(A.size()));
+  for (size_t i = 0; i < n; ++i) {
+    for (size_t j = 0; j < i; ++j) {
+      scalar_t sum = 0;
+      for (size_t k = 0; k < j; ++k) {
+        sum += A[i * n + k] * A[j * n + k];
+      }
+      A[i * n + j] = (1.0 / A[j * n + j] * (A[i * n + j] - sum));
+    }
+    // diagonal elements only
+    scalar_t sum = 0;
+    for (size_t k = 0; k < i; ++k) {
+      sum += A[i * n + k] * A[i * n + k];
+    }
+    A[i * n + i] = sqrt(A[i * n + i] - sum);
+  }
+}
+template <typename scalar_t>
+void backsolve_inplace_t(std::vector<scalar_t> &U, std::vector<scalar_t> &b,
+                         const size_t n) {
+  int i = static_cast<int>(n) - 1;
+  for (; i >= 0; --i) {
+    scalar_t sum = 0.0;
+    for (size_t j = i + 1; j < n; ++j) {
+      sum += U[j * n + i] * b[j];
+    }
+    b[i] = (b[i] - sum) / U[i * n + i];
+  }
+}
+template <typename scalar_t = double>
+void forwardsolve_inplace(std::vector<scalar_t> &update,
+                          const std::vector<scalar_t> &L,
+                          const std::vector<scalar_t> &b, const size_t n) {
+  std::fill(update.begin(), update.end(), 0.0);
+  for (size_t i = 0; i < n; ++i) {
+    scalar_t sum = 0.0;
+    for (size_t j = 0; j < i; ++j) {
+      sum += L[i * n + j] * update[j];
+    }
+    update[i] = (b[i] - sum) / L[i + i * n];
+  }
+}
+template <typename scalar_t>
+void get_update_with_hessian(std::vector<scalar_t> &update,
+                             std::vector<scalar_t> &hess,
+                             std::vector<scalar_t> &grad) {
+  // note that this overwrites the hessian due to the cholesky decomposition
+  // being in-place
+  // compute cholesky of hessian
+  cholesky(hess);
+  // use cholesky to solve system of equations
+  forwardsolve_inplace(update, hess, grad, grad.size());
+  backsolve_inplace_t(hess, update, grad.size());
+}
+
+// TODO(JSzitas): WIP nearest
+template <typename Callable, typename scalar_t,
+          typename Grad = fin_diff<Callable, scalar_t>,
+          typename Hess = fin_diff_h<Callable, scalar_t>>
+class [[maybe_unused]] LevenbergMarquardt {
+ private:
+  Callable &f;
+  Grad g;
+  Hess h;
+  scalar_t lambda;
+  const scalar_t upward_mult, downward_mult;
+  const size_t max_iter;
+  const scalar_t f_delta;
+
+ public:
+  // constructor
+  explicit LevenbergMarquardt<Callable, scalar_t, Grad, Hess>(
+      Callable &f, const scalar_t lambda = 20, const scalar_t upward_mult = 4.9,
+      const scalar_t downward_mult = 8.1, const size_t max_iter = 100,
+      const scalar_t f_delta = 1e-12, Grad g = fin_diff<Callable, scalar_t>(),
+      Hess h = fin_diff_h<Callable, scalar_t>())
+      : f(f),
+        g(g),
+        h(h),
+        lambda(lambda),
+        upward_mult(upward_mult),
+        downward_mult(downward_mult),
+        max_iter(max_iter),
+        f_delta(f_delta) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    static_assert(minimize,
+                  "LevenbergMarquardt currently only supports minimization");
+    const size_t n = x.size();
+    size_t iter = 0;
+    // scalar_t current_f_value;
+    size_t function_calls_used = 0, grad_evals_used = 0, hess_evals_used = 0;
+    std::vector<scalar_t> gradient(n, 0.0);
+    std::vector<scalar_t> hessian(n * n, 0.0);
+    // construct lambda that takes f and enables function evaluation counting
+    auto f_lam = [&](decltype(x) &coef) {
+      function_calls_used++;
+      return this->f(coef);
+    };
+    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
+      grad_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
+        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->g(this->f, coef, grad);
+      return;
+    };
+    auto h_lam = [&](decltype(x) &coef, decltype(hessian) &hess_) {
+      hess_evals_used++;
+      // simple optimization - finite difference gradient is actually stateless
+      // so in that case this wrapper is entirely valid
+      if constexpr (std::is_same<Hess, fin_diff_h<Callable, scalar_t>>::value) {
+        fin_diff_h<decltype(f_lam), scalar_t>()(f_lam, coef, hess_);
+        return;
+      }
+      /* otherwise we cannot keep track of function evaluations that way
+       * and our users will have to implement their own gradient function (that
+       * might be smarter, actually) - we can however implement our own counter
+       * for gradient evaluations
+       */
+      this->h(this->f, coef, hess_);
+      return;
+    };
+    g_lam(x, gradient);
+    h_lam(x, hessian);
+    scalar_t previous_f_value = 0.0;
+    scalar_t current_f_value = f_lam(x);
+    std::vector<scalar_t> update(x.size());
+    while (true) {
+      // stopping conditions
+      const scalar_t current_f_delta =
+          std::abs(previous_f_value - current_f_value);
+      if (iter > max_iter || current_f_delta < this->f_delta) {
+        return solver_status<scalar_t>(current_f_value, iter,
+                                       function_calls_used, grad_evals_used,
+                                       hess_evals_used);
+      }
+      previous_f_value = current_f_value;
+      iter++;
+      // update hessian and gradient
+      g_lam(x, gradient);
+      h_lam(x, hessian);
+      lambda = current_f_value < previous_f_value ? lambda / downward_mult
+                                                  : lambda * upward_mult;
+      // add current lambda to diagonal elements of H, compute H^-1 * G
+      for (size_t i = 0; i < n; i++) {
+        hessian[i * n + i] += lambda;
+      }
+      // compute update using gradient and hessian
+      get_update_with_hessian(update, hessian, gradient);
+      for (size_t i = 0; i < x.size(); i++) x[i] -= update[i];
+      current_f_value = f_lam(x);
+    }
+  }
+};
+
+// TODO(JSzitas): WIP
+template <typename Callable, typename RNG, typename scalar_t = double>
+class [[maybe_unused]] CMAES {
+ private:
+  Callable &f;
+  RNG &generator;
+  const scalar_t m_step;
+  const size_t max_iter;
+  const scalar_t condition, x_delta, f_delta;
+
+ public:
+  // constructor
+  [[maybe_unused]] CMAES<Callable, RNG, scalar_t>(
+      Callable &f, RNG &generator, const scalar_t m_step,
+      const size_t max_iter = 1000, const scalar_t condition = 1e14,
+      const scalar_t x_delta = 1e-7, const scalar_t f_delta = 1e-9)
+      : f(f),
+        generator(generator),
+        m_step(m_step),
+        max_iter(max_iter),
+        condition(condition),
+        x_delta(x_delta),
+        f_delta(f_delta) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    return this->solve<true>(x);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    return this->solve<false>(x);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
+    const size_t n = x.size();
+    size_t la = std::ceil(4 + round(3 * log(n)));
+    const size_t mu = std::floor(la / 2);
+    std::vector<scalar_t> w(mu);
+    for (size_t i = 0; i < mu; i++) {
+      w[i] = std::log(static_cast<scalar_t>(mu) + 1 / 2) -
+             log(static_cast<double>(i) + 1);
+    }
+    scalar_t w_sum = 0.0;
+    for (auto &weight : w) w_sum += weight;
+    // normalize weights
+    for (auto &weight : w) weight /= w_sum;
+    scalar_t mu_eff = 0.0;
+    for (auto &weight : w) mu_eff += weight * weight;
+    mu_eff = 1 / mu_eff;
+    // increase to 16 samples for very small populations
+    la = std::max<size_t>(size_t(16), la);
+    const scalar_t cc = (4. + mu_eff / n) / (n + 4. + 2. * mu_eff / n);
+    const scalar_t cs = (mu_eff + 2.) / (n + mu_eff + 5.);
+    const scalar_t c1 = 2. / (pow(n + 1.3, 2.) + mu_eff);
+    const scalar_t cmu = std::min(
+        1. - c1, 2. * (mu_eff - 2. + 1. / mu_eff) / (pow(n + 2, 2.) + mu_eff));
+    const scalar_t ds =
+        1. + cs + 2. * std::max(0., sqrt((mu_eff - 1.) / (n + 1.)) - 1.);
+    const scalar_t chi = sqrt(n) * (1. - 1. / (4. * n) + 1. / (21. * n * n));
+    const scalar_t hsig_thr = (1.4 + 2 / (n + 1.)) * chi;
+    std::vector<scalar_t> pc(n, 0.0), ps(n, 0.0);
+    // these are technically matrices, but we probably only need to allocate C
+    // here
+    std::vector<scalar_t> B(n * n, 0.0), D(n * n, 0.0), C(n * n, 0.0);
+    for (size_t i = 0; i < n; i++) {
+      B[i + i * n] = 1.0;
+      C[i + i * n] = 1.0;
+      D[i + i * n] = 1.0;
+    }
+    scalar_t sigma = m_step;
+    std::vector<scalar_t> x_mean = x;
+    std::vector<scalar_t> z_mean(n, 0.0);
+    std::vector<scalar_t> costs(la);
+    scalar_t current_value = this->f(x);
+    size_t eigen_last_eval = 0;
+    size_t eigen_next_eval =
+        std::max<size_t>(1, static_cast<size_t>(1 / (10 * n * (c1 + cmu))));
+    std::vector<scalar_t> particles_z(n * la);
+    // this is a std::vector<std::vector<scalar_t>> only because of how the
+    // interface to f is
+    std::vector<scalar_t> particles_x(n * la);
+    // take iterator type and use it in the lambda
+    size_t f_evals = 1;
+    using ItType = decltype(particles_x.begin());
+    std::vector<scalar_t> temp_eval_vec = x;
+    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
+    // set up a lambda to adapt the interface, and to allow us to keep track of
+    // function evaluations
+    auto f_lam = [&](ItType first, ItType last) {
+      size_t p = 0;
+      // copy values over to temporary
+      for (; first != last; ++first) {
+        temp_eval_vec[p++] = *first;
+      }
+      f_evals++;
+      // run evaluation on temporary
+      return f_multiplier * this->f(temp_eval_vec);
+    };
+    size_t iter = 0;
+    // initialize QRSolver
+    auto qr = tinyqr::QRSolver<scalar_t, true>(n);
+    // allocate BD and initialize it to identity matrix
+    std::vector<scalar_t> BD(n * n, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+      BD[i * n + i] = 1.0;
+    }
+    const scalar_t cs_update = std::sqrt(cs * (2. - cs) * mu_eff);
+    const scalar_t cc_update = std::sqrt(cc * (2. - cc) * mu_eff);
+    const scalar_t c_update = (1 - c1 - cmu);
+    const scalar_t cc_c_update = cc * (2 - cc);
+    // temporary storage - useful throughout
+    std::vector<scalar_t> temp_vec(std::max(n, la), 0.0);
+    // run main loop
+    while (true) {
+      // update Z particles
+      rnorm(this->generator, particles_z.begin(), particles_z.end());
+      for (int k = 0; k < la; ++k) {
+        // generate particles using current means, sigma and projection
+        scalar_t temp = 0.0;
+        for (size_t j = 0; j < n; j++) {
+          // the BD * particles_z is just a matrix vector product where
+          // particles_z can just be a pointer and offset this should be pretty
+          // easy to rewrite then in terms of e.g. a_plus_scalar_times_b as BD *
+          // particles_z is just a vector in the end of size nx1
+          // TODO(JSzitas): rewrite matrix product
+          // row of BD with value in particles
+          // scalar_t temp = 0.0;
+          // for(size_t i =0; k <n; k++) {
+          temp_vec[k] += BD[k * n + j] * particles_z[k * n + j];
+          //}
+          particles_x[k * n + j] = x_mean[j] + sigma;  //* //temp;
+        }
+        // arx.col(k) = x_mean + sigma * B*D*arz.col(k);
+        costs[k] =
+            f_lam(particles_x.begin() + k * n, particles_x.end() + k * n);
+      }
+      std::vector<size_t> indices = index_partial_sort(costs, mu);
+      // reset x_mean and z_mean
+      std::fill(x_mean.begin(), x_mean.end(), 0.0);
+      std::fill(z_mean.begin(), z_mean.end(), 0.0);
+      for (int k = 0; k < mu; k++) {
+        for (size_t j = 0; j < n; j++) {
+          z_mean[j] += w[k] * particles_z[indices[k] * n + j];
+          x_mean[j] += w[k] * particles_x[indices[k] * n + j];
+        }
+        // z_mean += w[k] * particles_z arz.col(indices[k]);
+        // x_mean += w[k]*arx.col(indices[k]);
+      }
+      // Update evolution paths using projection
+      // this is the only place where we need B, not BD, and the result is a
+      // vector
+      // ps = (1. - cs)*ps + mu_eff_update * B * z_mean;
+      const scalar_t cs_mult = (1 - cs);
+      for (size_t i = 0; i < n; i++) {
+        // TODO: SIMD candidate
+        ps[i] =
+            cs_mult * ps[i] + cs_update * qr.sqrt_eigenvalues(i) * z_mean[i];
+      }
+      // this is nasty, surely we can make it a bit nicer
+      // note that hsig basically works as a condition here; this might be one
+      // of the few times when using an if statement could be a significant
+      // optimization, as the switch leads to a lot of multiplication that gets
+      // carried out of it is == zero, which might be entirely redundant if this
+      // did not rely on iter, line 3804 could be constexpr, but I am not
+      // convinced its worthwhile
+      const bool hsig =
+          (nlsolver::math::norm(ps.data(), n) /
+           std::sqrt(std::pow(1 - (1. - cs), (2 * (iter + 1))))) < hsig_thr;
+      const scalar_t cc_mult = (1. - cc);
+      for (size_t i = 0; i < n; i++) {
+        pc *= cc_mult;
+      }
+      // default C update is on a constant schedule
+      C = c_update * C;
+      // only under hsig do we actually do anything dynamic => and that only
+      // happens for all **potential** threads in lockstep anyway at this level
+      if (hsig) {
+        pc += cc_update * (B * D * z_mean);
+        C += c1 * (pc * pc.transpose());
+      } else {
+        C += c1 * (pc * pc.transpose() + cc_c_update * C);
+      }
+      for (int k = 0; k < mu; ++k) {
+        // this should not get reallocated all the time, this is matrix * matrix
+        // * some vector, effectively reducing us to a vector, but B*D should be
+        // trivial to calculate ahead of time plus the D matrix should be a
+        // diagonal matrix (eigenvalues only) so why use full matrix multiplies
+        // TODO(JSzitas):
+        // we can actually cache this from computing the projection from before
+        // TVector temp = BD*arz.col(k);
+        // the product temp * temp' can probably be avoided altogether seeing we
+        // are writing to a matrix
+        // C += cmu * w[k] * temp * temp.transpose();
+      }
+      // ps norm can be precomputed once, it is also used on line 3950
+      sigma *= exp((cs / ds) * ((ps).norm() / chi - 1.));
+      // run new evaluations
+      if ((iter - eigen_last_eval) == eigen_next_eval) {
+        // Update B and D by running eigensolver
+        eigen_last_eval = iter;
+        // call QR solver's solve method
+        qr.solve(C);
+        // re-compute new BD without explicitly getting D and B
+        // there is a fast way to do it leveraging t(C) = t(B) * t(A) for matrix
+        // identities, since A is diagonal and we can do t(t(B)) to leverage
+        // cache locality
+        for (size_t i = 0; i < n; i++) {
+          for (size_t j = 0; j < n; j++) {
+            BD[i * n + j] =
+                qr.sqrt_eigenvalues(j) *
+                qr.eigenvectors()[i * n + j];  // column of D times values in B
+          }
+        }
+      }
+      // condition number, useful for convergence - ratio of largest and
+      // smallest eigenvalue
+      const scalar_t current_condition = qr.eigenvalue_condition_number();
+      // Super::m_current.condition = D.diagonal().maxCoeff() /
+      // D.diagonal().minCoeff();
+      //  compute difference in best value and difference in coefficients,
+      //  useful for checking convergence
+      const scalar_t current_f_delta =
+          std::abs(costs[indices[0]] - current_value);
+      const scalar_t current_x_delta =
+          nlsolver::math::norm_diff(x.data(), x_mean.data(), n);
+      x = x_mean;
+      current_value = costs[indices[0]];
+      // if all good solutions are becoming too similar, increase variance
+      if (std::abs(costs[indices[0]] - costs[indices[mu - 1]]) < 1e-6) {
+        sigma *= exp(0.2 + cs / ds);
+      }
+      if (iter >= this->max_iter || current_condition > this->condition ||
+          current_f_delta < this->f_delta || current_x_delta < this->x_delta) {
+        x = x_mean;
+        m_step = sigma;
+        return solver_status<scalar_t>(current_value, iter, f_evals);
       }
       iter++;
     }
@@ -3270,652 +4044,6 @@ class NelderMeadPSO {
     result /= (scalar_t)(i - 1);
     return sqrt(result);
   }
-};
-
-enum GradientStepType {
-  Linesearch,
-  Fixed,
-  Bigstep,
-  Anneal,
-  PAGE
-  // Momentum
-};
-
-template <const size_t level>
-constexpr size_t bigstep_offset() {
-  if constexpr (level == 1) return 0;
-  if constexpr (level == 2) return 2;
-  if constexpr (level == 3) return 5;
-  if constexpr (level == 4) return 12;
-  if constexpr (level == 5) return 27;
-  if constexpr (level == 6) return 58;
-  if constexpr (level == 7) return 121;
-  return 0;
-}
-
-template <const size_t level>
-constexpr size_t bigstep_len() {
-  if constexpr (level == 1) return 2;
-  if constexpr (level == 2) return 3;
-  if constexpr (level == 3) return 7;
-  if constexpr (level == 4) return 15;
-  if constexpr (level == 5) return 31;
-  if constexpr (level == 6) return 63;
-  if constexpr (level == 7) return 127;
-  return 0;
-}
-template <typename scalar_t>
-scalar_t norm(const std::vector<scalar_t> &x) {
-  scalar_t result = 0;
-  for (const auto &val : x) result += std::pow(val, 2);
-  return sqrt(result);
-}
-
-template <typename Callable, typename scalar_t>
-struct fin_diff {
-  void operator()(Callable &f, std::vector<scalar_t> &x,
-                  std::vector<scalar_t> &gradient) {
-    nlsolver::finite_difference::finite_difference_gradient<Callable, scalar_t,
-                                                            1>(f, x, gradient);
-  }
-};
-
-template <typename Callable, typename scalar_t,
-          const GradientStepType step = GradientStepType::Fixed,
-          const size_t bigstep_level = 5,
-          const bool grad_norm_lipschitz_scaling = true,
-          typename Grad = fin_diff<Callable, scalar_t>>
-class GradientDescent {
-  Callable &f;
-  Grad g;
-  const size_t max_iter, minibatch, minibatch_prime;
-  const scalar_t grad_eps, alpha;
-  nlsolver::rng::xorshift<scalar_t> generator;
-  constexpr static std::array<scalar_t, 248> fixed_steps = {
-      2.9, 1.5,                                 // pattern length 2 => type 1
-      1.5, 4.9,  1.5,                           // type 2
-      1.5, 2.2,  1.5,  12.0, 1.5,  2.2,   1.5,  // type 3
-      1.4, 2.0,  1.4,  4.5,  1.4,  2.0,   1.4, 29.7, 1.4,  2.0, 1.4, 4.5,   1.4,
-      2.0, 1.4,  // type 4
-      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 8.2,  1.4,  2.0, 1.4, 3.9,   1.4,
-      2.0, 1.4,  72.3, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 8.2, 1.4,   2.0,
-      1.4, 3.9,  1.4,  2.0,  1.4,  // type 5
-      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 7.2,  1.4,  2.0, 1.4, 3.9,   1.4,
-      2.0, 1.4,  14.2, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 7.2, 1.4,   2.0,
-      1.4, 3.9,  1.4,  2.0,  1.4,  164.0, 1.4, 2.0,  1.4,  3.9, 1.4, 2.0,   1.4,
-      7.2, 1.4,  2.0,  1.4,  3.9,  1.4,   2.0, 1.4,  14.2, 1.4, 2.0, 1.4,   3.9,
-      1.4, 2.0,  1.4,  7.2,  1.4,  2.0,   1.4, 3.9,  1.4,  2.0, 1.4,  // type 6
-      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 7.2,  1.4,  2.0, 1.4, 3.9,   1.4,
-      2.0, 1.4,  12.6, 1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4, 7.2, 1.4,   2.0,
-      1.4, 3.9,  1.4,  2.0,  1.4,  23.5,  1.4, 2.0,  1.4,  3.9, 1.4, 2.0,   1.4,
-      7.2, 1.4,  2.0,  1.4,  3.9,  1.4,   2.0, 1.4,  12.6, 1.4, 2.0, 1.4,   3.9,
-      1.4, 2.0,  1.4,  7.2,  1.4,  2.0,   1.4, 3.9,  1.4,  2.0, 1.4, 370.0, 1.4,
-      2.0, 1.4,  3.9,  1.4,  2.0,  1.4,   7.2, 1.4,  2.0,  1.4, 3.9, 1.4,   2.0,
-      1.4, 12.6, 1.4,  2.0,  1.4,  3.9,   1.4, 2.0,  1.4,  7.2, 1.4, 2.0,   1.4,
-      3.9, 1.4,  2.0,  1.4,  23.5, 1.4,   2.0, 1.4,  3.9,  1.4, 2.0, 1.4,   7.5,
-      1.4, 2.0,  1.4,  3.9,  1.4,  2.0,   1.4, 12.6, 1.4,  2.0, 1.4, 3.9,   1.4,
-      2.0, 1.4,  7.2,  1.4,  2.0,  1.4,   3.9, 1.4,  2.0,  1.4  // type 7
-  };
-  std::vector<scalar_t> search_direction, linesearch_temp, gradient_temp;
-
- public:
-  explicit GradientDescent<Callable, scalar_t, step, bigstep_level,
-                           grad_norm_lipschitz_scaling, Grad>(
-      Callable &f, const scalar_t alpha = 1, const size_t max_iter = 500,
-      const scalar_t grad_eps = 1e-12, const size_t minibatch_b = 128,
-      const size_t minibatch_b_prime = 11,
-      Grad g = fin_diff<Callable, scalar_t>())
-      : f(f),
-        g(g),
-        max_iter(max_iter),
-        minibatch(minibatch_b),
-        minibatch_prime(minibatch_b_prime),
-        grad_eps(grad_eps),
-        alpha(alpha),
-        generator(nlsolver::rng::xorshift<scalar_t>()) {}
-  // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
-    return this->solve<true>(x);
-  }
-  // maximize interface
-  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
-    return this->solve<false>(x);
-  }
-
- private:
-  template <const bool minimize = true>
-  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
-    const size_t n_dim = x.size();
-    int i_dim = static_cast<int>(n_dim);
-    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0),
-                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0);
-    if constexpr (step == GradientStepType::Linesearch) {
-      // we need additional temporaries for linesearch
-      this->search_direction = std::vector<scalar_t>(n_dim, 0.0);
-      this->linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
-      this->gradient_temp = std::vector<scalar_t>(n_dim, 0.0);
-    }
-    scalar_t alpha_ = this->alpha;
-    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
-    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    scalar_t max_grad_norm = 0;
-    // only necessary and interesting for PAGE
-    const scalar_t p = minibatch / (minibatch_prime + minibatch);
-    const scalar_t ratio = static_cast<scalar_t>(minibatch) /
-                           static_cast<scalar_t>(minibatch_prime);
-    // construct lambda that takes f and enables function evaluation counting
-    auto f_lam = [&](decltype(x) &coef) {
-      function_calls_used++;
-      return this->f(coef);
-    };
-    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
-      grad_evals_used++;
-      // simple optimization - finite difference gradient is actually stateless
-      // so in that case this wrapper is entirely valid
-      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
-        return;
-      }
-      /* otherwise we cannot keep track of function evaluations that way
-       * and our users will have to implement their own gradient function (that
-       * might be smarter, actually) - we can however implement our own counter
-       * for gradient evaluations
-       */
-      this->g(this->f, coef, grad);
-      return;
-    };
-    // compute gradient
-    g_lam(x, gradient);
-    while (true) {
-      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
-      max_grad_norm = std::max(max_grad_norm, grad_norm);
-      if (iter >= this->max_iter || grad_norm < grad_eps ||
-          std::isinf(grad_norm)) {
-        // evaluate at current parameters
-        scalar_t current_val = f_lam(x);
-        return solver_status<scalar_t>(current_val, iter, function_calls_used,
-                                       grad_evals_used);
-      }
-      if constexpr (step == GradientStepType::Linesearch) {
-        nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
-                                           this->search_direction.data(),
-                                           i_dim);
-        for (size_t i = 0; i < n_dim; i++) {
-          // this->search_direction[i] = f_multiplier * gradient[i];
-          this->gradient_temp[i] = gradient[i];
-        }
-        alpha_ = nlsolver::linesearch::more_thuente_search(
-            f_lam, x, this->gradient_temp, this->search_direction,
-            this->linesearch_temp, this->alpha, g_lam);
-      }
-      // do nothing - this is here just to make it more obvious
-      if constexpr (step == GradientStepType::Fixed) {
-      }
-      if constexpr (step == GradientStepType::Anneal) {
-        // update alpha using a cooling schedule
-        alpha_ = this->alpha / (1.0 + (static_cast<scalar_t>(iter) / max_iter));
-      }
-      if constexpr (step == GradientStepType::Bigstep) {
-        constexpr size_t offset = bigstep_offset<bigstep_level>();
-        constexpr size_t step_len = bigstep_len<bigstep_level>();
-        const size_t current_step = offset + iter % step_len;
-        if constexpr (bigstep_level == 0) {
-          alpha_ = ((current_step == 0) * (fixed_steps[current_step] - alpha)) +
-                   ((current_step != 0) * fixed_steps[current_step]);
-        }
-        if constexpr (bigstep_level != 0) {
-          alpha_ = fixed_steps[current_step];
-        }
-        if constexpr (grad_norm_lipschitz_scaling) {
-          alpha_ /= max_grad_norm;
-        }
-      }
-      // update parameters
-      alpha_ *= f_multiplier;
-      nlsolver::math::a_mult_scalar_add_b(gradient.data(), alpha_, x.data(),
-                                          i_dim);
-      if constexpr (step == GradientStepType::PAGE) {
-        for (size_t i = 0; i < n_dim; i++) prev_gradient[i] = gradient[i];
-      }
-      // compute gradient
-      g_lam(x, gradient);
-      if constexpr (step == GradientStepType::PAGE) {
-        if (generator() > p) {
-          // only do a small update where new gradient is old gradient
-          // + difference between gradients
-          nlsolver::math::a_minus_b_mult_scalar_add_c(
-              gradient.data(), prev_gradient.data(), ratio, gradient.data(),
-              i_dim);
-        }
-      }
-      iter++;
-    }
-  }
-};
-
-template <typename Callable, typename scalar_t,
-          typename Grad = fin_diff<Callable, scalar_t>>
-class ConjugatedGradientDescent {
-  Callable &f;
-  Grad g;
-  const size_t max_iter;
-  const scalar_t grad_eps, alpha;
-
- public:
-  explicit ConjugatedGradientDescent<Callable, scalar_t, Grad>(
-      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
-      const size_t max_iter = 500, const scalar_t grad_eps = 1e-12,
-      const scalar_t alpha = 0.03)
-      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
-  // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
-    return this->solve<true>(x);
-  }
-  // maximize interface
-  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
-    return this->solve<false>(x);
-  }
-
- private:
-  template <const bool minimize = true>
-  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
-    const size_t n_dim = x.size();
-    int i_dim = static_cast<int>(n_dim);
-    std::vector<scalar_t> gradient = std::vector<scalar_t>(n_dim, 0.0);
-    // we need additional temporaries for linesearch
-    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0);
-    std::vector<scalar_t> linesearch_temp = std::vector<scalar_t>(n_dim, 0.0);
-    scalar_t alpha_ = this->alpha;
-    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
-    constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    // construct lambda that takes f and enables function evaluation counting
-    auto f_lam = [&](decltype(x) &coef) {
-      function_calls_used++;
-      return this->f(coef);
-    };
-    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
-      grad_evals_used++;
-      // simple optimization - finite difference gradient is actually stateless
-      // so in that case this wrapper is entirely valid
-      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
-        return;
-      }
-      /* otherwise we cannot keep track of function evaluations that way
-       * and our users will have to implement their own gradient function (that
-       * might be smarter, actually) - we can however implement our own counter
-       * for gradient evaluations
-       */
-      this->g(this->f, coef, grad);
-      return;
-    };
-    g_lam(x, gradient);
-    // set search direction for linesearch
-    nlsolver::math::a_mult_scalar_to_b(gradient.data(), f_multiplier,
-                                       search_direction.data(), i_dim);
-    while (true) {
-      // compute gradient
-      const scalar_t grad_norm = math::norm(gradient.data(), i_dim);
-      if (iter >= this->max_iter || grad_norm < grad_eps ||
-          std::isinf(grad_norm)) {
-        // evaluate at current parameters
-        scalar_t current_val = f_lam(x);
-        return solver_status<scalar_t>(current_val, iter, function_calls_used,
-                                       grad_evals_used);
-      }
-      alpha_ = nlsolver::linesearch::armijo_search(
-          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha);
-      // update parameters; x[i] += search_direction[i] * alpha_;
-      nlsolver::math::a_mult_scalar_add_b(search_direction.data(), alpha_,
-                                          x.data(), i_dim);
-      // recompute gradient, compute new search direction using conjugation
-      // first, compute gradient.dot(gradient) with existing gradient,
-      // then compute new gradient and compute the same, then compute their
-      // ratio
-      scalar_t denominator = math::dot(gradient.data(), gradient.data(), i_dim);
-      g_lam(x, gradient);
-      // figure out the numerator from new gradient
-      scalar_t numerator = math::dot(gradient.data(), gradient.data(), i_dim);
-      const scalar_t search_update = numerator / denominator;
-      // update search direction
-      nlsolver::math::a_mul_scalar(search_direction.data(), search_update,
-                                   i_dim);
-      nlsolver::math::a_mult_scalar_add_b(gradient.data(), f_multiplier,
-                                          search_direction.data(), i_dim);
-      iter++;
-    }
-  }
-};
-template <typename scalar_t>
-void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
-                            const std::vector<scalar_t> &step,
-                            const std::vector<scalar_t> &grad_diff,
-                            std::vector<scalar_t> &grad_diff_inv_hess,
-                            const scalar_t rho) {
-  // precompute temporaries needed in the hessian update
-  const size_t n_dim = grad_diff.size();
-  int i_dim = static_cast<int>(n_dim);
-  for (size_t i = 0; i < n_dim; i++) {
-    grad_diff_inv_hess[i] =
-        math::dot(grad_diff.data(), inv_hessian.data() + (i * n_dim), i_dim);
-  }
-  scalar_t denom =
-      math::dot(grad_diff.data(), grad_diff_inv_hess.data(), i_dim);
-  denom = (denom * rho) + 1.0;
-  // step is                               | n_dim x 1
-  // grad_diff_inv_hess is                 |     1 x n_dim
-  // => step * grad_diff_inv_hess is a     | n_dim x n_dim
-  // inv_hess_grad_diff is                 | n_dim x 1
-  // -> inv_hess_grad_diff * step.t() is a | n_dim x n_dim
-  // TODO(JSzitas): SIMD candidate
-  for (size_t j = 0; j < n_dim; j++) {
-    for (size_t i = 0; i < n_dim; i++) {
-      // do not replace this with -= or the whole thing falls apart
-      // because of operator order precedence - e.g. whole rhs would
-      // get evaluated before -=, whereas we want to do inv_hessian - first part
-      // + second part
-      inv_hessian[j * n_dim + i] =
-          inv_hessian[j * n_dim + i] -
-          // first part
-          rho * (step[i] * grad_diff_inv_hess[j] +
-                 grad_diff_inv_hess[i] * step[j] +
-                 // second part ->  multiply(step[i], denom * step[j])
-                 denom * step[i] * step[j]);
-    }
-    // inline intrinsics would be complicated, but the above can probably be
-    // reduced to something a lot faster that way
-  }
-}
-template <typename Callable, typename scalar_t = double,
-          typename Grad = fin_diff<Callable, scalar_t>>
-class BFGS {
- private:
-  Callable &f;
-  Grad g;
-  // stopping
-  const size_t max_iter;
-  const scalar_t grad_eps, alpha;
-
- public:
-  // constructor
-  explicit BFGS<Callable, scalar_t, Grad>(
-      Callable &f, Grad g = fin_diff<Callable, scalar_t>(),
-      const size_t max_iter = 100, const scalar_t grad_eps = 5e-3,
-      const scalar_t alpha = 1)
-      : f(f), g(g), max_iter(max_iter), grad_eps(grad_eps), alpha(alpha) {}
-
-  // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
-    return this->solve<true>(x);
-  }
-  // maximize helper
-  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
-    return this->solve<false>(x);
-  }
-
- private:
-  template <const bool minimize = true>
-  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
-    static_assert(minimize, "BFGS currently only supports minimization");
-    const size_t n_dim = x.size();
-    int i_dim = static_cast<int>(n_dim);
-    std::vector<scalar_t> inverse_hessian =
-        std::vector<scalar_t>(n_dim * n_dim);
-    std::vector<scalar_t> search_direction = std::vector<scalar_t>(n_dim, 0.0),
-                          gradient = std::vector<scalar_t>(n_dim, 0.0),
-                          prev_gradient = std::vector<scalar_t>(n_dim, 0.0),
-                          grad_update = std::vector<scalar_t>(n_dim, 0.0),
-                          s = std::vector<scalar_t>(n_dim, 0.0),
-                          linesearch_temp = std::vector<scalar_t>(n_dim, 0.0),
-                          grad_diff_inv_hess(n_dim), inv_hess_grad_diff(n_dim);
-    // initialize to identity matrix
-    for (size_t i = 0; i < n_dim; i++) inverse_hessian[i + (i * n_dim)] = 1.0;
-    size_t iter = 0, function_calls_used = 0, grad_evals_used = 0;
-    auto f_lam = [&](decltype(x) &coef) {
-      function_calls_used++;
-      return this->f(coef);
-    };
-    auto g_lam = [&](decltype(x) &coef, decltype(gradient) &grad) {
-      grad_evals_used++;
-      // simple optimization - finite difference gradient is actually stateless
-      // so in that case this wrapper is entirely valid
-      if constexpr (std::is_same<Grad, fin_diff<Callable, scalar_t>>::value) {
-        fin_diff<decltype(f_lam), scalar_t>()(f_lam, coef, grad);
-        return;
-      }
-      /* otherwise we cannot keep track of function evaluations that way
-       * and our users will have to implement their own gradient function (that
-       * might be smarter, actually) - we can however implement our own counter
-       * for gradient evaluations
-       */
-      this->g(this->f, coef, grad);
-      return;
-    };
-    g_lam(x, gradient);
-    // constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
-    scalar_t prev_grad_norm = 1e9;
-    scalar_t current_grad_norm = 1e8;
-    while (true) {
-      if (iter >= this->max_iter || current_grad_norm < grad_eps ||
-          std::abs(current_grad_norm - prev_grad_norm) < grad_eps ||
-          std::isinf(current_grad_norm)) {
-        // evaluate at current parameters
-        scalar_t current_val = f_lam(x);
-        return solver_status<scalar_t>(current_val, iter, function_calls_used,
-                                       grad_evals_used);
-      }
-      // update search direction vector using -inverse_hessian * gradient
-      for (size_t j = 0; j < n_dim; j++) {
-        search_direction[j] = -math::dot(inverse_hessian.data() + (j * n_dim),
-                                         gradient.data(), i_dim);
-      }
-      scalar_t phi = math::dot(gradient.data(), search_direction.data(), i_dim);
-      if ((phi > 0) || std::isnan(phi) || current_grad_norm > prev_grad_norm) {
-        std::fill(inverse_hessian.begin(), inverse_hessian.end(), 0.0);
-        // reset hessian approximation and search_direction
-        for (size_t i = 0; i < n_dim; i++) {
-          inverse_hessian[i + (i * n_dim)] = 1.0;
-          search_direction[i] = -gradient[i];
-        }
-      }
-      prev_gradient = gradient;
-      const scalar_t rate = nlsolver::linesearch::more_thuente_search(
-          f_lam, x, gradient, search_direction, linesearch_temp, this->alpha,
-          g_lam);
-      // update parameters
-      nlsolver::math::a_mult_scalar_to_b(search_direction.data(), rate,
-                                         s.data(), i_dim);
-      nlsolver::math::a_plus_b(x.data(), s.data(), i_dim);
-      // we also need to compute the gradient at this new point
-      // update it by reference
-      g_lam(x, gradient);
-      prev_grad_norm = current_grad_norm;
-      current_grad_norm = norm(gradient);
-      // Update grad difference, rho and inverse hessian
-      nlsolver::math::a_minus_b_to_c(gradient.data(), prev_gradient.data(),
-                                     grad_update.data(), i_dim);
-      scalar_t rho = nlsolver::math::dot(grad_update.data(), s.data(), i_dim);
-      rho = 1 / rho;
-      // update inverse hessian using Sherman Morrisson
-      update_inverse_hessian(inverse_hessian, s, grad_update,
-                             grad_diff_inv_hess,  // inv_hess_grad_diff,
-                             rho);
-      iter++;
-    }
-  }
-};
-};  // namespace nlsolver
-
-namespace nlsolver::experimental {
-// TODO(JSzitas): WIP
-template <typename Callable, typename RNG, typename scalar_t = double>
-class CMAES {
- private:
-  Callable &f;
-  RNG &generator;
-  const scalar_t m_step;
-  const size_t max_iter;
-  const scalar_t condition, x_delta, f_delta;
- public:
-  // constructor
-  CMAES<Callable, RNG, scalar_t>(Callable &f, RNG &generator, const scalar_t m_step,
-                                 const size_t max_iter = 1000,
-                                 const scalar_t condition = 1e14,
-                                 const scalar_t x_delta = 1e-7,
-                                 const scalar_t f_delta = 1e-9) : f(f),
-    generator(generator), m_step(m_step), max_iter(max_iter), condition(condition),
-    x_delta(x_delta), f_delta(f_delta) {}
-  // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
-    return this->solve<true>(x);
-  }
-  // maximize helper
-  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
-    return this->solve<false>(x);
-  }
-
- private:
-  template <const bool minimize = true>
-  solver_status<scalar_t> solve(std::vector<scalar_t> &x) {
-    const size_t n = x.size();
-    size_t la = std::ceil(4 + round(3 * log(n)));
-    const size_t mu = std::floor(la / 2);
-    std::vector<scalar_t> w(mu);
-    for (size_t i = 0; i < mu; i++) {
-      w[i] = std::log(static_cast<scalar_t>(mu) + 1 / 2) -
-             log(static_cast<double>(i) + 1);
-    }
-    scalar_t w_sum = 0.0;
-    for (auto &weight : w) w_sum += weight;
-    // normalize weights
-    for (auto &weight : w) weight /= w_sum;
-    scalar_t mu_eff = 0.0;
-    for (auto &weight : w) mu_eff += weight * weight;
-    mu_eff = 1 / mu_eff;
-    // increase to 16 samples for very small populations
-    la = std::max<size_t>(size_t(16), la);
-    const scalar_t cc = (4. + mu_eff / n) / (n + 4. + 2. * mu_eff / n);
-    const scalar_t cs = (mu_eff + 2.) / (n + mu_eff + 5.);
-    const scalar_t c1 = 2. / (pow(n + 1.3, 2.) + mu_eff);
-    const scalar_t cmu = std::min(
-        1. - c1, 2. * (mu_eff - 2. + 1. / mu_eff) / (pow(n + 2, 2.) + mu_eff));
-    const scalar_t ds =
-        1. + cs + 2. * std::max(0., sqrt((mu_eff - 1.) / (n + 1.)) - 1.);
-    const scalar_t chi = sqrt(n) * (1. - 1. / (4. * n) + 1. / (21. * n * n));
-    const scalar_t hsig_thr = (1.4 + 2 / (n + 1.)) * chi;
-    std::vector<scalar_t> pc(n, 0.0), ps(n, 0.0);
-    // these are technically matrices, but we probably only need to allocate C here
-    std::vector<scalar_t> B(n * n, 0.0), D(n * n, 0.0), C(n * n, 0.0);
-    for (size_t i = 0; i < n; i++) {
-      B[i + i * n] = 1.0;
-      C[i + i * n] = 1.0;
-      D[i + i * n] = 1.0;
-    }
-    scalar_t sigma = m_step;
-    std::vector<scalar_t> x_mean = x;
-    std::vector<scalar_t> z_mean(n, 0.0);
-    std::vector<scalar_t> costs(la);
-    scalar_t current_value = this->f(x);
-    size_t eigen_last_eval = 0;
-    size_t eigen_next_eval = std::max<size_t>(1, static_cast<size_t>(1/(10*n*(c1+cmu))));
-    std::vector<scalar_t> particles_z(n*la);
-    // this is a std::vector<std::vector<scalar_t>> only because of how the interface to f is
-    std::vector<scalar_t> particles_x(n*la);
-    // take iterator type and use it in the labmda
-    size_t f_evals = 1;
-    using ItType = decltype(particles_x.begin());
-    std::vector<scalar_t> temp_eval_vec = x;
-    // set up a lambda to adapt the interface, and to allow us to keep track of function evaluations
-    auto f_lam = [&](ItType first, ItType last) {
-        size_t p = 0;
-        // copy values over to temporary
-        for(;first != last; ++first) {
-            temp_eval_vec[p++] = *first;
-        }
-        f_evals++;
-        // run evaluation on temporary
-        return this->f(temp_eval_vec);
-    };
-    size_t iter = 0;
-    // run main loop
-    while(true) {
-        // update Z particles
-        rnorm(this->generator, particles_z.begin(), particles_z.end());
-      for (int k = 0; k < la; ++k) {
-        //arz.col(k) = rnorm(this->generator, particles.begin(), particles.end());   //normDist(n);
-        // generate particles using current means, sigma and projection
-        for(size_t j = 0; j < n; j++) {
-            particles_x[k * n + j] = x_mean[j] + sigma; //* ;
-        }
-        //arx.col(k) = x_mean + sigma * B*D*arz.col(k);
-        costs[k] = f_lam(particles_x.begin() + k * n, particles_x.end() + k * n);//this->f(arx.col(k));
-      }
-      std::vector<size_t> indices = index_partial_sort(costs, mu);
-      // reset x_mean and z_mean
-      std::fill(x_mean.begin(), x_mean.end(), 0.0);
-      std::fill(z_mean.begin(), z_mean.end(), 0.0);
-      for (int k = 0; k < mu; k++) {
-          for(size_t j = 0; j <n; j++) {
-              z_mean[j] += w[k] * particles_z[indices[k]*n + j];
-              x_mean[j] += w[k] * particles_x[indices[k]*n + j];
-          }
-        //z_mean += w[k] * particles_z arz.col(indices[k]);
-        //x_mean += w[k]*arx.col(indices[k]);
-      }
-      // Update evolution paths using projection
-      ps = (1. - cs)*ps + sqrt(cs*(2. - cs)*mu_eff) * B * z_mean;
-      // this is nasty, surely we can make it a bit nicer
-      scalar_t hsig = (ps.norm()/sqrt(pow(1 - (1. - cs), (2 *
-        (iter + 1)))) < hsig_thr) ? 1.0 : 0.0; pc = (1. -
-        cc)*pc + hsig*sqrt(cc*(2. - cc)*mu_eff)*(B*D*z_mean);
-
-      // Adapt covariance matrix
-      C = (1 - c1 - cmu)*C
-          + c1*(pc*pc.transpose() + (1 - hsig)*cc*(2 - cc)*C);
-      for (int k = 0; k < mu; ++k) {
-        // this should not get reallocated all the time, this is matrix * matrix * some vector,
-        // effectively reducing us to a vector, but B*D should be trivial to calculate ahead of time
-        // plus the D matrix should be a diagonal matrix (eigenvalues only) so why use full
-        // matrix multiplies
-        //TODO(JSzitas):
-        // we can actually cache this from computing the projection from before
-        //TVector temp = B*D*arz.col(k);
-        // the product temp * temp' can probably be avoided altogether seeing we are writing to a matrix
-        //C += cmu * w[k] * temp * temp.transpose();
-      }
-      sigma *= exp((cs/ds) * ((ps).norm()/chi - 1.));
-      // run new evaluations
-      if ((iter - eigen_last_eval) == eigen_next_eval) {
-        // Update B and D by running eigensolver
-        eigen_last_eval = iter;
-        auto [D,B] = tinyqr::qr_decomposition(C);
-        // take sqrt of eigenvalues
-        //Eigen::SelfAdjointEigenSolver<THessian> eigenSolver(C);
-        //B = eigenSolver.eigenvectors();
-        //D.diagonal() = eigenSolver.eigenvalues().array().sqrt();
-      }
-      // condition number, useful for convergence - ratio of largest and smallest eigenvalue
-      const scalar_t current_condition = D[0]/D.back();
-      //Super::m_current.condition = D.diagonal().maxCoeff() / D.diagonal().minCoeff();
-      x = x_mean;
-      // compute difference in best value and difference in coefficients,
-      // useful for checking convergence
-      const scalar_t current_f_delta = std::abs(costs[indices[0]] - current_value);
-      const scalar_t current_x_delta = (x_mean - x).norm();
-      current_value = costs[indices[0]];
-      // if all good solutions are becoming too similar, increase variance
-      if (std::abs(costs[indices[0]] - costs[indices[mu-1]]) < 1e-6) {
-        sigma *= exp(0.2 + cs / ds);
-      }
-      if(iter >= this->max_iter || current_condition > this->condition ||
-         current_f_delta < this->f_delta || current_x_delta < this->x_delta) {
-            x = x_mean;
-            m_step = sigma;
-            return solver_status<scalar_t>(current_value, iter, f_evals);
-    }
-    iter++;
-  }
-}
 };
 }  // namespace nlsolver::experimental
 

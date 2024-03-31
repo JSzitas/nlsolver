@@ -21,14 +21,14 @@ Just copy the header into your project, include and use:
   + Vanilla
   + Accelerated
 * Simulated Annealing 
-  + Currently without option for custom sample generators, only using the Markov Gaussian Kernel 
+  + Currently, without option for custom sample generators, only using the Markov Gaussian Kernel 
 * Nelder-Mead PSO hybrid
   + Might under-perform other solvers, but should do better than vanilla Nelder-Mead on problems with 
   many local minima where Nelder-Mead can get stuck
 * Gradient Descent 
-  + Several flavours, including Vanilla with fixed steps, steps optimized using MoreThuente linesearch, 
+  + Several flavours, including Vanilla with fixed steps, optimized using MoreThuente linesearch, 
   and even an implementation of [Provably Faster Gradient Descent via Long Steps](https://arxiv.org/abs/2307.06324) 
-  in case you have a particularly well behaved smooth convex problem.
+  in case you have a particularly well-behaved smooth convex problem.
   
 ## Experimental 
   
@@ -105,7 +105,7 @@ And run the examples from the command line
 
 There are some design decisions in this library which warrant discussion: 
 
-* the objective functions to minimize/ maximize are passed as objects, prefering functors, 
+* the objective functions to minimize/ maximize are passed as objects, preferring functors, 
 requiring an overloaded **public** **()** operator which takes a **std::vector<T>**, e.g. 
 ```cpp
 struct example {
@@ -119,7 +119,7 @@ note that this will also work with lambda functions, and a struct/class is not s
 * there are no virtual calls in this library - thus incurring no performance penalty
 * each function exposes both a minimization and a maximization interface, and maximization is 
   always implemented as 'negative minimization', i.e. by multiplying the objective function by -1
-* all optimizers come with default arguments that try to be sane and user friendly - but expert 
+* all optimizers come with default arguments that try to be sane and user-friendly - but expert 
   users are highly encouraged to supply their own values
 * currently no multi-threading is supported - this is by design as functors are *potentially*
   stateful objective functions and multi-threading would require ensuring no data races happen
@@ -137,10 +137,10 @@ impure objective functions).
 
 # Notes
 
-[^lambda_note]: This flexibility is included for cases where you want to implicitly bundle mutable data within 
+[^lambda_note] This flexibility is included for cases where you want to implicitly bundle mutable data within 
 the struct, and do not want to have to pass the data (e.g. through a pointer) to your objective function. 
-This makes the overall design cleaner - if your objective function needs data, mainstains state, or 
+This makes the overall design cleaner - if your objective function needs data, maintains state, or 
 does anything else on evaluation, you can keep the entirety of that within the struct (and even extract it 
-after the solver finishes). If you do not need the functionality and you simply want to optimize some ad-hoc function, using 
+after the solver finishes). If you do not need the functionality, and you simply want to optimize some ad-hoc function, using 
 a lambda is probably much simpler and cleaner. 
 
