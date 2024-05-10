@@ -46,13 +46,14 @@ class Rosenbrock {
     return t1 * t1 + 100 * t2 * t2;
   }
 };
-
+/*
 void print_vector(std::vector<double> &x) {
   for (auto &val : x) {
     std::cout << val << ",";
   }
   std::cout << "\n";
 }
+ */
 
 // to use any C++ standard random number generator just pass in a generator
 // functor e.g. using Mersene Twister
@@ -196,9 +197,27 @@ int main() {
   auto bfgs_solver = BFGS<Rosenbrock, double>(prob);
   run_solver(bfgs_solver, {2, 2});
 
-  std::cout << "LevenbergMarquardt (always requires hessian)" << std::endl;
+  std::cout << "Levenberg-Marquardt (always requires hessian)" << std::endl;
   auto lm_solver = LevenbergMarquardt<Rosenbrock, double>(prob);
   run_solver(lm_solver, {2, 2});
+
+  // perhaps a bit more appropriate example
+  // this forms a 'mountain' where we are trying to get into the nearest
+  // 'valley'
+  struct Mountain {
+    double operator()(std::vector<double> &x) {
+      return std::pow(std::pow(x[0], 2) + x[1] - 25, 2) +
+             std::pow(x[0] + std::pow(x[1], 2) - 25, 2);
+    }
+    double operator()(std::vector<double> &&x) {
+      return std::pow(std::pow(x[0], 2) + x[1] - 25, 2) +
+             std::pow(x[0] + std::pow(x[1], 2) - 25, 2);
+    }
+  };
+  Mountain prob2;
+  std::cout << "Levenberg-Marquardt (better example)" << std::endl;
+  auto lm_solver2 = LevenbergMarquardt<Mountain, double>(prob2);
+  run_solver(lm_solver2, {0, 0});
 
   return 0;
 }

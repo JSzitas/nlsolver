@@ -41,9 +41,13 @@
 
 #include "./tinyqr.h"
 
-// only for the stopwatch code
-#include <chrono>  // NOLINT [build/c++11] (this is not a Google project)
-#include <type_traits>
+// TODO(JSzitas): delete
+void print_vector(std::vector<double> &x) {
+  for (auto &val : x) {
+    std::cout << val << ",";
+  }
+  std::cout << "\n";
+}
 
 // mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
@@ -1331,10 +1335,13 @@ void finite_difference_gradient(Callable &f, std::vector<scalar_t> &x,
 template <typename Callable, typename scalar_t, const size_t accuracy = 0>
 void finite_difference_hessian(Callable &f, std::vector<scalar_t> &x,  // NOLINT
                                std::vector<scalar_t> &hess) {
-  constexpr scalar_t eps = std::numeric_limits<scalar_t>::epsilon() * 10e7;
+  constexpr auto eps_mult = static_cast<scalar_t>(1.0 / 4.0);
+  const scalar_t eps =
+      std::pow(std::numeric_limits<scalar_t>::epsilon(), eps_mult);
+  // std::cout << "Epsilon: "<< eps;
   const size_t p = x.size();
   if constexpr (accuracy == 0) {
-    constexpr scalar_t denom = eps * eps;
+    const scalar_t denom = eps * eps;
     // this can be hoisted entirely out of the loop - it is the first
     // evaluation at current x
     const scalar_t f4 = f(x);
@@ -1359,8 +1366,8 @@ void finite_difference_hessian(Callable &f, std::vector<scalar_t> &x,  // NOLINT
       }
     }
   } else {
-    constexpr scalar_t denom = (600.0 * eps * eps), two_eps = 2 * eps,
-                       three_eps = 3 * eps, four_eps = 4 * eps;
+    const scalar_t denom = (600.0 * eps * eps), two_eps = 2 * eps,
+                   three_eps = 3 * eps, four_eps = 4 * eps;
     for (size_t i = 0; i < p; i++) {
       const scalar_t temp_i = x[i];
       for (size_t j = 0; j < p; j++) {
@@ -1877,6 +1884,8 @@ struct simplex {
   }
   // TODO(JSzitas): clean up
   [[maybe_unused]] void print() const {
+    std::cout << "Simplex of size " << vals.size() << ',' << vals[0].size()
+              << '\n';
     for (const auto &val : vals) {
       for (const auto &item : val) {
         std::cout << item << ",";
@@ -2036,9 +2045,9 @@ class NelderMead {
   explicit NelderMead<Callable, scalar_t>(
       Callable &f, const scalar_t step = -1, const scalar_t alpha = 1,
       const scalar_t gamma = 2, const scalar_t rho = 0.5,
-      const scalar_t sigma = 0.5, const scalar_t eps = 1e-3,
-      const size_t max_iter = 500, const size_t no_change_best_tol = 10,
-      const size_t restarts = 3)
+      const scalar_t sigma = 0.5, const scalar_t eps = 1e-8,
+      const size_t max_iter = 5, const size_t no_change_best_tol = 20,
+      const size_t restarts = 0)
       : f(f),
         step(step),
         alpha(alpha),
@@ -2098,8 +2107,7 @@ class NelderMead {
     std::vector<scalar_t> scores(current_simplex.size());
     /* this basically ensures that for minimization we are seeking
      * minimum of function **f**, and for maximization we are seeking minimum of
-     * **-f** - and the compiler should hopefully treat this fairly well
-     */
+     * **-f** */
     constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
     // score simplex values
     for (size_t i = 0; i < current_simplex.size(); i++) {
@@ -2154,6 +2162,10 @@ class NelderMead {
       // reaching tolerance
       if (iter >= this->max_iter || fun_std_err < this->eps ||
           no_change_iter >= this->no_change_best_tol) {
+        current_simplex.print();
+        print_vector(scores);
+        std::cout << fun_std_err << std::endl;
+        std::cout << "No change: " << no_change_iter << std::endl;
         x = current_simplex.vals[best];
         return solver_status<scalar_t>(scores[best], iter, function_calls_used);
       }
@@ -2166,12 +2178,15 @@ class NelderMead {
                                                this->alpha, upper, lower);
       // score reflected point
       ref_score = f_multiplier * f(temp_reflect);
+      std::cout << "Score of reflected point: " << ref_score << std::endl;
       function_calls_used++;
       // if reflected point is better than second worst, not better than best
       if (ref_score >= scores[best] && ref_score < scores[second_worst]) {
+        std::cout << "Using reflected point " << std::endl;
         current_simplex.replace(temp_reflect, worst);
         // otherwise if this is the best score so far, expand
       } else if (ref_score < scores[best]) {
+        std::cout << "Reflected point is best" << std::endl;
         simplex_transform<scalar_t, false, bound>(
             temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
         // obtain score for expanded point
@@ -2184,6 +2199,7 @@ class NelderMead {
         scores[worst] = exp_score < ref_score ? exp_score : ref_score;
         // otherwise we have a point  worse than the 'second worst'
       } else {
+        std::cout << "Contracting" << std::endl;
         // contract outside
         simplex_transform<scalar_t, true, bound>(
             ref_score < scores[worst]
@@ -2197,11 +2213,13 @@ class NelderMead {
         // if this contraction is better than the reflected point or worst
         if (cont_score <
             (ref_score < scores[worst] ? ref_score : scores[worst])) {
+          std::cout << "Contraction was better" << std::endl;
           // replace worst point with contracted point
           current_simplex.replace(temp_contract, worst);
           scores[worst] = cont_score;
           // otherwise shrink
         } else {
+          std::cout << "Shrinking" << std::endl;
           // if we had not violated the bounds before shrinking, shrinking
           // will not cause new violations - hence no bounds applied here
           shrink(current_simplex, best, this->sigma);
@@ -2215,6 +2233,7 @@ class NelderMead {
           }
           function_calls_used += current_simplex.size() - 1;
         }
+        current_simplex.print();
       }
     }
   }
@@ -3258,17 +3277,41 @@ void forwardsolve_inplace(std::vector<scalar_t> &update,
     update[i] = (b[i] - sum) / L[i + i * n];
   }
 }
+template <typename T>
+bool is_diagonal(const std::vector<T> &A) {
+  const size_t size = std::sqrt(A.size());
+  for (size_t i = 0; i < size; ++i) {
+    for (size_t j = 0; j < size; ++j) {
+      if (i != j &&
+          A[i * size + j] > std::numeric_limits<T>::epsilon() * 1e12) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 template <typename scalar_t>
 void get_update_with_hessian(std::vector<scalar_t> &update,
                              std::vector<scalar_t> &hess,
                              std::vector<scalar_t> &grad) {
+  // if hessian is diagonal we have a much faster update - since the inverse
+  // is just 1/diagonal entry, and the products are just simple multiplications
+  const size_t n = grad.size();
+  if (is_diagonal(hess)) {
+    // much faster update loop
+    for (size_t i = 0; i < n; i++) {
+      update[i] = grad[i] / hess[i * n + i];
+    }
+    return;
+  }
   // note that this overwrites the hessian due to the cholesky decomposition
   // being in-place
   // compute cholesky of hessian
   cholesky(hess);
   // use cholesky to solve system of equations
-  forwardsolve_inplace(update, hess, grad, grad.size());
-  backsolve_inplace_t(hess, update, grad.size());
+  forwardsolve_inplace(update, hess, grad, n);
+  backsolve_inplace_t(hess, update, n);
 }
 
 // TODO(JSzitas): WIP nearest
@@ -3288,8 +3331,8 @@ class [[maybe_unused]] LevenbergMarquardt {
  public:
   // constructor
   explicit LevenbergMarquardt<Callable, scalar_t, Grad, Hess>(
-      Callable &f, const scalar_t lambda = 20, const scalar_t upward_mult = 4.9,
-      const scalar_t downward_mult = 8.1, const size_t max_iter = 100,
+      Callable &f, const scalar_t lambda = 10, const scalar_t upward_mult = 10,
+      const scalar_t downward_mult = 10, const size_t max_iter = 100,
       const scalar_t f_delta = 1e-12, Grad g = fin_diff<Callable, scalar_t>(),
       Hess h = fin_diff_h<Callable, scalar_t>())
       : f(f),
@@ -3366,18 +3409,12 @@ class [[maybe_unused]] LevenbergMarquardt {
       // stopping conditions
       const scalar_t current_f_delta =
           std::abs(previous_f_value - current_f_value);
-      if (iter > max_iter || current_f_delta < this->f_delta) {
+      if (iter >= max_iter || current_f_delta < this->f_delta ||
+          std::isnan(previous_f_value)) {
         return solver_status<scalar_t>(current_f_value, iter,
                                        function_calls_used, grad_evals_used,
                                        hess_evals_used);
       }
-      previous_f_value = current_f_value;
-      iter++;
-      // update hessian and gradient
-      g_lam(x, gradient);
-      h_lam(x, hessian);
-      lambda = current_f_value < previous_f_value ? lambda / downward_mult
-                                                  : lambda * upward_mult;
       // add current lambda to diagonal elements of H, compute H^-1 * G
       for (size_t i = 0; i < n; i++) {
         hessian[i * n + i] += lambda;
@@ -3385,7 +3422,14 @@ class [[maybe_unused]] LevenbergMarquardt {
       // compute update using gradient and hessian
       get_update_with_hessian(update, hessian, gradient);
       for (size_t i = 0; i < x.size(); i++) x[i] -= update[i];
+      previous_f_value = current_f_value;
       current_f_value = f_lam(x);
+      iter++;
+      // update hessian and gradient
+      g_lam(x, gradient);
+      h_lam(x, hessian);
+      lambda = current_f_value < previous_f_value ? lambda / downward_mult
+                                                  : lambda * upward_mult;
     }
   }
 };
