@@ -42,7 +42,8 @@
 #include "./tinyqr.h"
 
 // TODO(JSzitas): delete
-void print_vector(std::vector<double> &x) {
+template <typename T>
+void print_vector(T x) {
   for (auto &val : x) {
     std::cout << val << ",";
   }
@@ -243,6 +244,86 @@ template <typename T>
                  denom * *(step + i) * *(step + j));
     }
   }
+}
+template <typename scalar_t>
+void cholesky(std::vector<scalar_t> &A) {
+  const auto n = static_cast<size_t>(std::sqrt(A.size()));
+  for (size_t i = 0; i < n; ++i) {
+    for (size_t j = 0; j < i; ++j) {
+      scalar_t sum = 0;
+      for (size_t k = 0; k < j; ++k) {
+        sum += A[i * n + k] * A[j * n + k];
+      }
+      A[i * n + j] = (1.0 / A[j * n + j] * (A[i * n + j] - sum));
+    }
+    // diagonal elements only
+    scalar_t sum = 0;
+    for (size_t k = 0; k < i; ++k) {
+      sum += A[i * n + k] * A[i * n + k];
+    }
+    A[i * n + i] = sqrt(A[i * n + i] - sum);
+  }
+}
+template <typename scalar_t>
+void backsolve_inplace_t(std::vector<scalar_t> &U, std::vector<scalar_t> &b,
+                         const size_t n) {
+  int i = static_cast<int>(n) - 1;
+  for (; i >= 0; --i) {
+    scalar_t sum = 0.0;
+    for (size_t j = i + 1; j < n; ++j) {
+      sum += U[j * n + i] * b[j];
+    }
+    b[i] = (b[i] - sum) / U[i * n + i];
+  }
+}
+template <typename scalar_t = double>
+void forwardsolve_inplace(std::vector<scalar_t> &update,
+                          const std::vector<scalar_t> &L,
+                          const std::vector<scalar_t> &b, const size_t n) {
+  std::fill(update.begin(), update.end(), 0.0);
+  for (size_t i = 0; i < n; ++i) {
+    scalar_t sum = 0.0;
+    for (size_t j = 0; j < i; ++j) {
+      sum += L[i * n + j] * update[j];
+    }
+    update[i] = (b[i] - sum) / L[i + i * n];
+  }
+}
+template <typename T>
+bool is_diagonal(const std::vector<T> &A) {
+  const size_t size = std::sqrt(A.size());
+  for (size_t i = 0; i < size; ++i) {
+    for (size_t j = 0; j < size; ++j) {
+      if (i != j &&
+          A[i * size + j] > std::numeric_limits<T>::epsilon() * 1e12) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+template <typename scalar_t>
+void get_update_with_hessian(std::vector<scalar_t> &update,
+                             std::vector<scalar_t> &hess,
+                             std::vector<scalar_t> &grad) {
+  // if hessian is diagonal we have a much faster update - since the inverse
+  // is just 1/diagonal entry, and the products are just simple multiplications
+  const size_t n = grad.size();
+  if (is_diagonal(hess)) {
+    // much faster update loop
+    for (size_t i = 0; i < n; i++) {
+      update[i] = grad[i] / hess[i * n + i];
+    }
+    return;
+  }
+  // note that this overwrites the hessian due to the cholesky decomposition
+  // being in-place
+  // compute cholesky of hessian
+  cholesky(hess);
+  // use cholesky to solve system of equations
+  forwardsolve_inplace(update, hess, grad, n);
+  backsolve_inplace_t(hess, update, n);
 }
 
 // inspired by annoylib, see
@@ -1233,7 +1314,7 @@ struct xoshiro {
     return (x << rotate_bits) | (x >> (bits - rotate_bits));
   }
   scalar_t operator()() { return this->yield(); }
-  void reset() {
+  [[maybe_unused]] void reset() {
     splitmix<scalar_t> gn;
     s[0] = gn.yield_init();
     s[1] = s[0] >> 32;
@@ -1882,18 +1963,6 @@ struct simplex {
                                                   : new_val[i];
     }
   }
-  // TODO(JSzitas): clean up
-  [[maybe_unused]] void print() const {
-    std::cout << "Simplex of size " << vals.size() << ',' << vals[0].size()
-              << '\n';
-    for (const auto &val : vals) {
-      for (const auto &item : val) {
-        std::cout << item << ",";
-      }
-      std::cout << "\n";
-    }
-    std::cout << "\n";
-  }
   [[nodiscard]] size_t size() const { return this->vals.size(); }
   std::vector<std::vector<scalar_t>> vals;
 };
@@ -1916,7 +1985,7 @@ inline void update_centroid(std::vector<scalar_t> &centroid,
       centroid[j] += x.vals[i][j];
     }
   }
-  for (auto &val : centroid) val /= static_cast<scalar_t>(i);
+  for (auto &val : centroid) val /= static_cast<scalar_t>(i - 1);
 }
 // bound version
 template <typename scalar_t = double, const bool reflect = false,
@@ -1947,11 +2016,12 @@ inline void shrink(simplex<scalar_t> &current_simplex, const size_t best,
                    const scalar_t sigma) {
   // take a reference to the best vector
   std::vector<scalar_t> &best_val = current_simplex.vals[best];
+  const size_t n = best_val.size();
   for (size_t i = 0; i < best; i++) {
     // update all items in current vector using the best vector -
     // hopefully the contiguous data here can help a bit with cache
     // locality
-    for (size_t j = 0; j < best; j++) {
+    for (size_t j = 0; j < n; j++) {
       // TODO(JSzitas): SIMD Candidate
       current_simplex.vals[i][j] =
           best_val[j] + sigma * (current_simplex.vals[i][j] - best_val[j]);
@@ -1961,7 +2031,7 @@ inline void shrink(simplex<scalar_t> &current_simplex, const size_t best,
   // extra work (e.g. check i == best) which could lead to a branch
   // mis-prediction
   for (size_t i = best + 1; i < current_simplex.size(); i++) {
-    for (size_t j = 0; j < best; j++) {
+    for (size_t j = 0; j < n; j++) {
       // TODO(JSzitas): SIMD Candidate
       current_simplex.vals[i][j] =
           best_val[j] + sigma * (current_simplex.vals[i][j] - best_val[j]);
@@ -2045,8 +2115,8 @@ class NelderMead {
   explicit NelderMead<Callable, scalar_t>(
       Callable &f, const scalar_t step = -1, const scalar_t alpha = 1,
       const scalar_t gamma = 2, const scalar_t rho = 0.5,
-      const scalar_t sigma = 0.5, const scalar_t eps = 1e-8,
-      const size_t max_iter = 5, const size_t no_change_best_tol = 20,
+      const scalar_t sigma = 0.5, const scalar_t eps = 1e-6,
+      const size_t max_iter = 500, const size_t no_change_best_tol = 20,
       const size_t restarts = 0)
       : f(f),
         step(step),
@@ -2108,34 +2178,39 @@ class NelderMead {
     /* this basically ensures that for minimization we are seeking
      * minimum of function **f**, and for maximization we are seeking minimum of
      * **-f** */
-    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    size_t function_calls_used = 0;
+    auto f_lam = [&](decltype(x) &x_) {
+      constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+      auto val = f_multiplier * f(x_);
+      function_calls_used++;
+      return val;
+    };
     // score simplex values
     for (size_t i = 0; i < current_simplex.size(); i++) {
-      scores[i] = f_multiplier * f(current_simplex.vals[i]);
+      scores[i] = f_lam(current_simplex.vals[i]);
     }
-    size_t function_calls_used = current_simplex.size();
     // set relative convergence tolerance using evaluation with initial
     // parameters
     this->eps = eps * (scores[0] * eps);
     // find best and worst score
-    size_t best, worst, second_worst, last_best = 99999999, no_change_iter = 0;
+    size_t best, worst = 0, second_worst = 0, prev_worst = 0,
+                 last_best = 99999999, no_change_iter = 0;
 
     size_t iter = 0;
-    std::vector<scalar_t> centroid(x.size());
-
-    std::vector<scalar_t> temp_reflect(x.size());
-    std::vector<scalar_t> temp_expand(x.size());
-    std::vector<scalar_t> temp_contract(x.size());
-
+    std::vector<scalar_t> centroid(x.size()), temp_reflect(x.size()),
+        temp_expand(x.size()), temp_contract(x.size());
     scalar_t ref_score, exp_score, cont_score, fun_std_err;
+    bool we_called_shrink = false;
     // simplex iteration
     while (true) {
       // find best, worst and second worst scores
       best = 0;
-      worst = 0;
+      prev_worst = worst;
+      worst = 0;  // check if worst changed rather than directly overwriting;
+      // if it did not, we do not need to recompute the centroid unless we
+      // shrunk
       second_worst = 0;
       fun_std_err = std_err(scores);
-
       for (size_t i = 1; i < scores.size(); i++) {
         // if function value is lower than the current smallest,
         // this is the new best point
@@ -2162,36 +2237,31 @@ class NelderMead {
       // reaching tolerance
       if (iter >= this->max_iter || fun_std_err < this->eps ||
           no_change_iter >= this->no_change_best_tol) {
-        current_simplex.print();
-        print_vector(scores);
-        std::cout << fun_std_err << std::endl;
-        std::cout << "No change: " << no_change_iter << std::endl;
         x = current_simplex.vals[best];
         return solver_status<scalar_t>(scores[best], iter, function_calls_used);
       }
       iter++;
       // compute centroid of all points except for the worst one
-      update_centroid(centroid, current_simplex, worst);
+      if (prev_worst != worst || we_called_shrink) {
+        update_centroid(centroid, current_simplex, worst);
+        we_called_shrink = false;
+      }
       // reflect worst point
       simplex_transform<scalar_t, true, bound>(current_simplex.vals[worst],
                                                centroid, temp_reflect,
                                                this->alpha, upper, lower);
       // score reflected point
-      ref_score = f_multiplier * f(temp_reflect);
-      std::cout << "Score of reflected point: " << ref_score << std::endl;
-      function_calls_used++;
+      ref_score = f_lam(temp_reflect);
       // if reflected point is better than second worst, not better than best
       if (ref_score >= scores[best] && ref_score < scores[second_worst]) {
-        std::cout << "Using reflected point " << std::endl;
         current_simplex.replace(temp_reflect, worst);
+        scores[worst] = ref_score;
         // otherwise if this is the best score so far, expand
       } else if (ref_score < scores[best]) {
-        std::cout << "Reflected point is best" << std::endl;
         simplex_transform<scalar_t, false, bound>(
             temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
         // obtain score for expanded point
-        exp_score = f_multiplier * f(temp_expand);
-        function_calls_used++;
+        exp_score = f_lam(temp_expand);
         // if this is better than the expanded point score, replace worst point
         // with the expanded point, otherwise replace it with reflected point
         current_simplex.replace(
@@ -2199,7 +2269,6 @@ class NelderMead {
         scores[worst] = exp_score < ref_score ? exp_score : ref_score;
         // otherwise we have a point  worse than the 'second worst'
       } else {
-        std::cout << "Contracting" << std::endl;
         // contract outside
         simplex_transform<scalar_t, true, bound>(
             ref_score < scores[worst]
@@ -2208,32 +2277,28 @@ class NelderMead {
                 // or point is the worst point so far - contract inside
                 current_simplex.vals[worst],
             centroid, temp_contract, this->rho, upper, lower);
-        cont_score = f_multiplier * f(temp_contract);
-        function_calls_used++;
+        cont_score = f_lam(temp_contract);
         // if this contraction is better than the reflected point or worst
         if (cont_score <
             (ref_score < scores[worst] ? ref_score : scores[worst])) {
-          std::cout << "Contraction was better" << std::endl;
           // replace worst point with contracted point
           current_simplex.replace(temp_contract, worst);
           scores[worst] = cont_score;
           // otherwise shrink
         } else {
-          std::cout << "Shrinking" << std::endl;
           // if we had not violated the bounds before shrinking, shrinking
           // will not cause new violations - hence no bounds applied here
           shrink(current_simplex, best, this->sigma);
           // only in this case do we have to score again
           for (size_t i = 0; i < best; i++) {
-            scores[i] = f_multiplier * f(current_simplex.vals[i]);
+            scores[i] = f_lam(current_simplex.vals[i]);
           }
           // we have not updated the best value - hence no need to 'rescore'
           for (size_t i = best + 1; i < current_simplex.size(); i++) {
-            scores[i] = f_multiplier * f(current_simplex.vals[i]);
+            scores[i] = f_lam(current_simplex.vals[i]);
           }
-          function_calls_used += current_simplex.size() - 1;
+          we_called_shrink = true;
         }
-        current_simplex.print();
       }
     }
   }
@@ -2327,7 +2392,7 @@ class DE {
 
  public:
   // constructor
-  DE<Callable, RNG, scalar_t, RecombinationType>(
+  [[maybe_unused]] DE<Callable, RNG, scalar_t, RecombinationType>(
       Callable &f, RNG &generator, const scalar_t crossover_prob = 0.9,
       const scalar_t differential_weight = 0.8, const scalar_t eps = 10e-4,
       const size_t pop_size = 50, const size_t max_iter = 1000,
@@ -2459,7 +2524,7 @@ class PSO {
   const scalar_t eps;
 
  public:
-  explicit PSO<Callable, RNG, scalar_t, Type>(
+  [[maybe_unused]] PSO<Callable, RNG, scalar_t, Type>(
       Callable &f, RNG &generator, const scalar_t inertia = 0.8,
       const scalar_t cognitive_coef = 1.8, const scalar_t social_coef = 1.8,
       const size_t n_particles = 10, const size_t max_iter = 5000,
@@ -2596,7 +2661,6 @@ class PSO {
         std::vector<scalar_t>(this->n_particles, 10000);
   }
   void update_velocities() {
-    // TODO(JSzitas): SIMD Candidate
     // scalar_t r_p = 0, r_g = 0;
     for (size_t i = 0; i < this->n_particles; i++) {
       for (size_t j = 0; j < this->n_dim; j++) {
@@ -2617,7 +2681,6 @@ class PSO {
     }
   }
   void update_positions() {
-    // TODO(JSzitas): SIMD Candidate
     if constexpr (Type == Vanilla) {
       for (size_t i = 0; i < this->n_particles; i++) {
         for (size_t j = 0; j < this->n_dim; j++) {
@@ -2630,7 +2693,6 @@ class PSO {
       for (size_t i = 0; i < this->n_particles; i++) {
         for (size_t j = 0; j < this->n_dim; j++) {
           // no need to use velocity - all can be inlined here
-          // TODO(JSzitas): SIMD Candidate
           this->particle_positions[i][j] =
               this->inertia * rnorm<scalar_t>(this->generator) +
               // discount position
@@ -2663,7 +2725,6 @@ class PSO {
     bool update_happened = false;
     for (size_t i = 0; i < this->n_particles; i++) {
       scalar_t temp = f_multiplier * f(particle_positions[i]);
-      this->f_evals++;
       if (temp < this->swarm_best_value) {
         this->swarm_best_value = temp;
         // save update of swarm best position for after the loop, so we do not
@@ -2675,6 +2736,7 @@ class PSO {
         this->particle_best_values[i] = temp;
       }
     }
+    this->f_evals += n_particles;
     if (update_happened) {
       this->swarm_best_position = this->particle_positions[best_index];
     }
@@ -2697,10 +2759,9 @@ class SANN {
   const scalar_t temperature_max;
 
  public:
-  SANN<Callable, RNG, scalar_t>(Callable &f, RNG &generator,
-                                const size_t max_iter = 5000,
-                                const size_t temperature_iter = 10,
-                                const scalar_t temperature_max = 10.0)
+  [[maybe_unused]] SANN<Callable, RNG, scalar_t>(
+      Callable &f, RNG &generator, const size_t max_iter = 5000,
+      const size_t temperature_iter = 10, const scalar_t temperature_max = 10.0)
       : generator(generator),
         f(f),
         f_evals(0),
@@ -3092,7 +3153,6 @@ void update_inverse_hessian(std::vector<scalar_t> &inv_hessian,
   // => step * grad_diff_inv_hess is a     | n_dim x n_dim
   // inv_hess_grad_diff is                 | n_dim x 1
   // -> inv_hess_grad_diff * step.t() is a | n_dim x n_dim
-  // TODO(JSzitas): SIMD candidate
   for (size_t j = 0; j < n_dim; j++) {
     for (size_t i = 0; i < n_dim; i++) {
       // do not replace this with -= or the whole thing falls apart
@@ -3229,92 +3289,147 @@ class BFGS {
     }
   }
 };
-}  // namespace nlsolver
+template <typename Callable, typename scalar_t>
+class [[maybe_unused]] Brent {
+  Callable &f;
+  const scalar_t tol, eps;
+  const size_t max_iter;
 
-namespace nlsolver::experimental {
-// TODO(JSzitas): These probably belong in math
-template <typename scalar_t>
-void cholesky(std::vector<scalar_t> &A) {
-  const auto n = static_cast<size_t>(std::sqrt(A.size()));
-  for (size_t i = 0; i < n; ++i) {
-    for (size_t j = 0; j < i; ++j) {
-      scalar_t sum = 0;
-      for (size_t k = 0; k < j; ++k) {
-        sum += A[i * n + k] * A[j * n + k];
+ public:
+  explicit Brent(Callable &f, const scalar_t tol = 1e-12,
+                 const scalar_t eps = 1e-12, const size_t max_iter = 200)
+      : f(f), tol(tol), eps(eps), max_iter(max_iter) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(scalar_t &x,
+                                                    const scalar_t lower = -5,
+                                                    const scalar_t upper = 5) {
+    return this->solve<true>(x, upper, lower);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(scalar_t &x,
+                                                    const scalar_t lower = -5,
+                                                    const scalar_t upper = 5) {
+    return this->solve<false>(x, upper, lower);
+  }
+
+ private:
+  template <const bool minimize = true>
+  solver_status<scalar_t> solve(scalar_t &x_, const scalar_t upper,
+                                const scalar_t lower) {
+    // lightly adapted from R's C level Brent_fmin
+    // values
+    size_t f_evals_used = 0;
+    constexpr scalar_t f_mult = minimize ? 1.0 : -1.0;
+    // functor
+    auto f_lam = [&](auto x) {
+      const auto val = f_mult * this->f(x);
+      f_evals_used++;
+      return val;
+    };
+    /*  c is the squared inverse of the golden ratio */
+    const scalar_t c = (3. - std::sqrt(5.)) * .5;
+    /* Local variables */
+    scalar_t a, b, d, e, p, q, r, u, v, w, x, t2, fu, fv, fw, fx, xm, tol1,
+        tol3;
+    /*  eps is approximately the square root of the relative machine precision.
+     */
+    tol1 = eps + 1.; /* the smallest 1.000... > 1 */
+    a = lower;
+    b = upper;
+    v = a + c * (b - a);
+    w = v;
+    x = v;
+    d = 0.; /* -Wall */
+    e = 0.;
+    fx = f_lam(x);
+    fv = fx;
+    fw = fx;
+    tol3 = tol / 3.;
+    /*  main loop starts here ----------------------------------- */
+    size_t iter = 0;
+    for (; iter < max_iter; ++iter) {
+      xm = (a + b) * .5;
+      tol1 = eps * fabs(x) + tol3;
+      t2 = tol1 * 2.;
+      /* check stopping criterion */
+      if (std::fabs(x - xm) <= t2 - (b - a) * .5) break;
+      p = 0.;
+      q = 0.;
+      r = 0.;
+      if (std::fabs(e) > tol1) { /* fit parabola */
+        r = (x - w) * (fx - fv);
+        q = (x - v) * (fx - fw);
+        p = (x - v) * q - (x - w) * r;
+        q = (q - r) * 2.;
+        if (q > 0.) {
+          p = -p;
+        } else {
+          q = -q;
+        }
+        r = e;
+        e = d;
       }
-      A[i * n + j] = (1.0 / A[j * n + j] * (A[i * n + j] - sum));
-    }
-    // diagonal elements only
-    scalar_t sum = 0;
-    for (size_t k = 0; k < i; ++k) {
-      sum += A[i * n + k] * A[i * n + k];
-    }
-    A[i * n + i] = sqrt(A[i * n + i] - sum);
-  }
-}
-template <typename scalar_t>
-void backsolve_inplace_t(std::vector<scalar_t> &U, std::vector<scalar_t> &b,
-                         const size_t n) {
-  int i = static_cast<int>(n) - 1;
-  for (; i >= 0; --i) {
-    scalar_t sum = 0.0;
-    for (size_t j = i + 1; j < n; ++j) {
-      sum += U[j * n + i] * b[j];
-    }
-    b[i] = (b[i] - sum) / U[i * n + i];
-  }
-}
-template <typename scalar_t = double>
-void forwardsolve_inplace(std::vector<scalar_t> &update,
-                          const std::vector<scalar_t> &L,
-                          const std::vector<scalar_t> &b, const size_t n) {
-  std::fill(update.begin(), update.end(), 0.0);
-  for (size_t i = 0; i < n; ++i) {
-    scalar_t sum = 0.0;
-    for (size_t j = 0; j < i; ++j) {
-      sum += L[i * n + j] * update[j];
-    }
-    update[i] = (b[i] - sum) / L[i + i * n];
-  }
-}
-template <typename T>
-bool is_diagonal(const std::vector<T> &A) {
-  const size_t size = std::sqrt(A.size());
-  for (size_t i = 0; i < size; ++i) {
-    for (size_t j = 0; j < size; ++j) {
-      if (i != j &&
-          A[i * size + j] > std::numeric_limits<T>::epsilon() * 1e12) {
-        return false;
+      if (std::fabs(p) >= std::fabs(q * .5 * r) || p <= q * (a - x) ||
+          p >= q * (b - x)) { /* a golden-section step */
+        if (x < xm) {
+          e = b - x;
+        } else {
+          e = a - x;
+        }
+        d = c * e;
+      } else { /* a parabolic-interpolation step */
+        d = p / q;
+        u = x + d;
+        /* f must not be evaluated too close to ax or bx */
+        if (u - a < t2 || b - u < t2) {
+          d = tol1;
+          if (x >= xm) {
+            d = -d;
+          }
+        }
+      }
+      /* f must not be evaluated too close to x */
+      if (std::fabs(d) >= tol1) {
+        u = x + d;
+      } else if (d > 0.) {
+        u = x + tol1;
+      } else {
+        u = x - tol1;
+      }
+      fu = f_lam(u);
+      /*  update  a, b, v, w, and x */
+      if (fu <= fx) {
+        if (u < x)
+          b = x;
+        else
+          a = x;
+        v = w;
+        w = x;
+        x = u;
+        fv = fw;
+        fw = fx;
+        fx = fu;
+      } else {
+        if (u < x) {
+          a = u;
+        } else {
+          b = u;
+        }
+        if (fu <= fw || w == x) {
+          v = w;
+          fv = fw;
+          w = u;
+          fw = fu;
+        } else if (fu <= fv || v == x || v == w) {
+          v = u;
+          fv = fu;
+        }
       }
     }
+    x_ = fx;
+    return solver_status<scalar_t>(x, iter, f_evals_used);
   }
-  return true;
-}
-
-template <typename scalar_t>
-void get_update_with_hessian(std::vector<scalar_t> &update,
-                             std::vector<scalar_t> &hess,
-                             std::vector<scalar_t> &grad) {
-  // if hessian is diagonal we have a much faster update - since the inverse
-  // is just 1/diagonal entry, and the products are just simple multiplications
-  const size_t n = grad.size();
-  if (is_diagonal(hess)) {
-    // much faster update loop
-    for (size_t i = 0; i < n; i++) {
-      update[i] = grad[i] / hess[i * n + i];
-    }
-    return;
-  }
-  // note that this overwrites the hessian due to the cholesky decomposition
-  // being in-place
-  // compute cholesky of hessian
-  cholesky(hess);
-  // use cholesky to solve system of equations
-  forwardsolve_inplace(update, hess, grad, n);
-  backsolve_inplace_t(hess, update, n);
-}
-
-// TODO(JSzitas): WIP nearest
+};
 template <typename Callable, typename scalar_t,
           typename Grad = fin_diff<Callable, scalar_t>,
           typename Hess = fin_diff_h<Callable, scalar_t>>
@@ -3420,7 +3535,7 @@ class [[maybe_unused]] LevenbergMarquardt {
         hessian[i * n + i] += lambda;
       }
       // compute update using gradient and hessian
-      get_update_with_hessian(update, hessian, gradient);
+      nlsolver::math::get_update_with_hessian(update, hessian, gradient);
       for (size_t i = 0; i < x.size(); i++) x[i] -= update[i];
       previous_f_value = current_f_value;
       current_f_value = f_lam(x);
@@ -3433,7 +3548,384 @@ class [[maybe_unused]] LevenbergMarquardt {
     }
   }
 };
+template <typename Callable, typename RNG, typename scalar_t = double>
+class NelderMeadPSO {
+ private:
+  // user supplied
+  RNG &generator;
+  Callable &f;
+  // initialized once
+  const scalar_t alpha, gamma, rho, sigma, inertia, cognitive_coef, social_coef;
+  scalar_t eps;
+  // used during optimization
+  std::vector<std::vector<scalar_t>> particle_positions, particle_velocities;
+  std::vector<scalar_t> particle_current_values;
+  const size_t max_iter, no_change_best_iter;
+  size_t function_calls_used = 0;
 
+ public:
+  // constructor
+  [[maybe_unused]] NelderMeadPSO(
+      Callable &f, RNG &generator, const scalar_t alpha = 1,
+      const scalar_t gamma = 2, const scalar_t rho = 0.5,
+      const scalar_t sigma = 0.5, const scalar_t inertia = 0.8,
+      const scalar_t cognitive_coef = 1.8, const scalar_t social_coef = 1.8,
+      const scalar_t eps = 1e-6, const size_t restarts = 0,
+      const size_t max_iter = 1000, const size_t no_change_best_iter = 20)
+      : generator(generator),
+        f(f),
+        alpha(alpha),
+        gamma(gamma),
+        rho(rho),
+        sigma(sigma),
+        inertia(inertia),
+        cognitive_coef(cognitive_coef),
+        social_coef(social_coef),
+        eps(eps),
+        max_iter(max_iter),
+        no_change_best_iter(no_change_best_iter) {}
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    // compute implied upper and lower bounds
+    std::vector<scalar_t> lower(n_dim);
+    std::vector<scalar_t> upper(n_dim);
+    for (size_t i = 0; i < n_dim; i++) {
+      scalar_t temp = std::abs(2.5 * x[i]);
+      lower[i] = -temp;
+      upper[i] = temp;
+    }
+    return this->solve<true, false>(x, upper, lower);
+  }
+  // maximize interface
+  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
+    const size_t n_dim = x.size();
+    // compute implied upper and lower bounds
+    std::vector<scalar_t> lower(n_dim);
+    std::vector<scalar_t> upper(n_dim);
+    for (size_t i = 0; i < n_dim; i++) {
+      scalar_t temp = std::abs(2.5 * x[i]);
+      lower[i] = -temp;
+      upper[i] = temp;
+    }
+    return this->solve<false, false>(x, upper, lower);
+  }
+  // minimize interface
+  [[maybe_unused]] solver_status<scalar_t> minimize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
+    return this->solve<true, true>(x, upper, lower);
+  }
+  // maximize helper
+  [[maybe_unused]] solver_status<scalar_t> maximize(
+      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
+      const std::vector<scalar_t> &upper) {
+    return this->solve<false, true>(x, upper, lower);
+  }
+
+ private:
+  template <const bool minimize = true, const bool bound = false>
+  solver_status<scalar_t> solve(std::vector<scalar_t> &x,
+                                const std::vector<scalar_t> &upper,
+                                const std::vector<scalar_t> &lower) {
+    const size_t n_dim = x.size();
+    if (n_dim < 2) {
+      std::cout
+          << "You are trying to optimize a one dimensional function "
+          << "you should probably be using vanilla NelderMead (or vanilla PSO)"
+          << " - our implementation does not support this in the "
+             "NelderMead-PSO hybrid."
+          << std::endl;
+      // return some invalid solver state
+      return solver_status<scalar_t>(999999, 0, 0);
+    }
+    // initialize solver state
+    const size_t n_simplex_particles = n_dim + 1, n_pso_particles = 2 * n_dim,
+                 n_particles = n_pso_particles + n_simplex_particles;
+    init_solver_state<minimize>(x, upper, lower, n_simplex_particles,
+                                n_pso_particles, n_dim);
+    // temporaries for the simplex
+    std::vector<scalar_t> centroid(n_dim), temp_reflect(n_dim),
+        temp_expand(n_dim), temp_contract(n_dim);
+    // create an index for the current particle order (best to worst)
+    std::vector<size_t> current_order(n_particles);
+    std::iota(current_order.begin(), current_order.end(), 0);
+    size_t iter = 0;
+    scalar_t best_val = this->particle_current_values[0];
+    size_t best_val_no_change = 0;
+    while (true) {
+      // sort particles from best to worst
+      std::sort(current_order.begin(), current_order.end(),
+                [&](size_t left_id, size_t right_id) -> bool {
+                  return this->particle_current_values[left_id] <
+                         this->particle_current_values[right_id];
+                });
+      // record if best value was updated
+      const bool best_val_stayed_same =
+          best_val == this->particle_current_values[current_order[0]];
+      // this rolls together - increment by one or reset
+      best_val_no_change += best_val_stayed_same;
+      best_val_no_change *= best_val_stayed_same;
+      // stopping criteria
+      if (iter >= this->max_iter ||
+          best_val_no_change >= this->no_change_best_iter ||
+          // this should be applied only over the simplex particles
+          this->simplex_std_err(current_order, n_simplex_particles) <
+              this->eps) {
+        x = this->particle_positions[current_order[0]];
+        // best scores, iteration number and function calls used total
+        return solver_status<scalar_t>(
+            this->particle_current_values[current_order[0]], iter,
+            this->function_calls_used);
+      }
+      // use top N+1 particles to form simplex and apply the simplex update
+      apply_simplex<minimize, bound>(centroid, temp_reflect, temp_expand,
+                                     temp_contract, current_order,
+                                     n_simplex_particles, n_dim, upper, lower);
+      // update the rest of the particles - i.e. the non-simplex ones
+      // using the regular PSO update
+      apply_pso<minimize, bound>(current_order, n_simplex_particles,
+                                 n_particles, n_dim, upper, lower);
+      iter++;
+    }
+  }
+  template <const bool minimize = true>
+  void init_solver_state(const std::vector<scalar_t> &x,
+                         const std::vector<scalar_t> &upper,
+                         const std::vector<scalar_t> &lower,
+                         const size_t nm_particles, const size_t pso_particles,
+                         const size_t n_dim) {
+    const size_t n_particles = nm_particles + pso_particles;
+    this->particle_positions = std::vector<std::vector<scalar_t>>(n_particles);
+    this->particle_velocities = std::vector<std::vector<scalar_t>>(n_particles);
+    this->particle_current_values = std::vector<scalar_t>(n_particles);
+    this->function_calls_used = 0;
+    size_t i = 0;
+    for (; i < n_particles; i++) {
+      this->particle_positions[i] = std::vector<scalar_t>(n_dim);
+      this->particle_velocities[i] = std::vector<scalar_t>(n_dim, 0.0);
+    }
+    // create particles - first x.size() + 1 particles should be initialized
+    // as in NM; this follows Gao and Han, see:
+    // 'Proper initialization is crucial for the Nelder–Mead simplex search.'
+    // (2019), Wessing, S.  Optimization Letters 13, p. 847–856
+    // (also at https://link.springer.com/article/10.1007/s11590-018-1284-4)
+    particle_positions[0] = x;
+    for (i = 1; i < nm_particles; i++) {
+      scalar_t x_inf_norm = max_abs_vec(x);
+      // if smaller than 1, set to 1
+      scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
+      // if larger than 10, set to 10
+      scalar_t scale = a < 10 ? a : 10;
+      for (i = 1; i < nm_particles; i++) {
+        particle_positions[i] = x;
+        particle_positions[i][i] = x[i] + scale;
+      }
+      // update first simplex point
+      auto n = static_cast<scalar_t>(x.size());
+      for (i = 0; i < x.size(); i++) {
+        particle_positions[0][i] = x[i] + ((1.0 - sqrt(n + 1.0)) / n * scale);
+      }
+    }
+    // the rest according to PSO
+    for (i = nm_particles; i < n_particles; i++) {
+      for (size_t j = 0; j < n_dim; j++) {
+        // update velocities and positions
+        scalar_t temp = std::abs(upper[j] - lower[j]);
+        this->particle_positions[i][j] =
+            lower[j] + ((upper[j] - lower[j]) * generator());
+        this->particle_velocities[i][j] = -temp + (generator() * temp);
+      }
+    }
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    for (i = 0; i < n_particles; i++) {
+      this->particle_current_values[i] =
+          f_multiplier * f(particle_positions[i]);
+      this->function_calls_used++;
+    }
+  }
+  template <const bool minimize, const bool bound>
+  void apply_simplex(std::vector<scalar_t> &centroid,
+                     std::vector<scalar_t> &temp_reflect,
+                     std::vector<scalar_t> &temp_expand,
+                     std::vector<scalar_t> &temp_contract,
+                     std::vector<size_t> &current_order,
+                     const size_t nm_particles, const size_t n_dim,
+                     const std::vector<scalar_t> &upper,
+                     const std::vector<scalar_t> &lower) {
+    const scalar_t best_score = this->particle_current_values[current_order[0]];
+    const size_t worst_id = current_order[nm_particles - 1];
+    const size_t second_worst_id = current_order[nm_particles - 2];
+    // update centroid of all points except for the worst one
+    this->update_centroid(centroid, current_order, nm_particles - 1);
+    // reflect worst point
+    simplex_transform<scalar_t, true, bound>(this->particle_positions[worst_id],
+                                             centroid, temp_reflect,
+                                             this->alpha, upper, lower);
+    // set constant multiplier for minimization
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    // score reflected point
+    const scalar_t ref_score = f_multiplier * f(temp_reflect);
+    this->function_calls_used++;
+    // if reflected point is better than second worst, but not better than best
+    if (ref_score >= best_score &&
+        ref_score < this->particle_current_values[second_worst_id]) {
+      this->particle_positions[worst_id] = temp_reflect;
+      this->particle_current_values[worst_id] = ref_score;
+      // otherwise if this is the best score so far, expand
+    } else if (ref_score < best_score) {
+      simplex_transform<scalar_t, false, bound>(
+          temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
+      // obtain score for expanded point
+      const scalar_t exp_score = f_multiplier * f(temp_expand);
+      this->function_calls_used++;
+      // if this is better than the expanded point score, replace the worst
+      // point with the expanded point, otherwise replace it with
+      // the reflected point
+      std::vector<scalar_t> &replacement =
+          exp_score < ref_score ? temp_expand : temp_reflect;
+      this->particle_positions[worst_id] = replacement;
+      this->particle_current_values[worst_id] =
+          exp_score < ref_score ? exp_score : ref_score;
+      // otherwise we have a point  worse than the 'second worst'
+    } else {
+      // contract outside - here we overwrite the 'temp_expand' and it
+      // functionally becomes 'temp_contract'
+      const scalar_t worst_score = this->particle_current_values[worst_id];
+      simplex_transform<scalar_t, false, bound>(
+          ref_score < worst_score
+              ? temp_reflect
+              :
+              // or point is the worst point so far - contract inside
+              this->particle_positions[worst_id],
+          centroid, temp_contract, this->rho, upper, lower);
+      const scalar_t cont_score = f_multiplier * f(temp_contract);
+      this->function_calls_used++;
+      // if this contraction is better than the reflected point or worst point
+      if (cont_score < std::min(ref_score, worst_score)) {
+        // replace worst point with contracted point
+        this->particle_positions[worst_id] = temp_contract;
+        this->particle_current_values[worst_id] = cont_score;
+        // otherwise shrink
+      } else {
+        // if we had not violated the bounds before shrinking, shrinking
+        // will not cause new violations - hence no bounds applied here
+        shrink(current_order, this->sigma, nm_particles, n_dim);
+        // only in this case do we have to score again
+        for (size_t i = 1; i < nm_particles; i++) {
+          this->particle_current_values[current_order[i]] =
+              f_multiplier * f(this->particle_positions[current_order[i]]);
+        }
+        this->function_calls_used += nm_particles - 1;
+        // re-sort, as PSO step is called after this
+        std::sort(current_order.begin(), current_order.end(),
+                  [&](size_t left_id, size_t right_id) -> bool {
+                    return this->particle_current_values[left_id] <
+                           this->particle_current_values[right_id];
+                  });
+      }
+    }
+  }
+  template <const bool minimize, const bool bound>
+  void apply_pso(const std::vector<size_t> &current_order,
+                 const size_t n_simplex_particles,
+                 const size_t n_total_particles, const size_t n_dim,
+                 const std::vector<scalar_t> &upper,
+                 const std::vector<scalar_t> &lower) {
+    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
+    bool order_flip = false;
+    size_t best_in_pair = current_order[n_simplex_particles];
+    const std::vector<scalar_t> &best =
+        this->particle_positions[current_order[0]];
+    for (size_t i = n_simplex_particles; i < n_total_particles; i++) {
+      const size_t id = current_order[i];
+      if (order_flip) {
+        best_in_pair = current_order[i + 1];
+      }
+      order_flip = static_cast<bool>((i - n_simplex_particles) % 2);
+      // get references to current particle, current velocity and pairwise best
+      // particle
+      std::vector<scalar_t> &particle = particle_positions[id],
+                            velocity = this->particle_velocities[id],
+                            pairwise_best = particle_positions[best_in_pair];
+      for (size_t j = 0; j < n_dim; j++) {
+        // generate random movements
+        const scalar_t r_p = generator(), r_g = generator();
+        // update current velocity for current particle - inertia update
+        // TODO(JSzitas): SIMD Candidate
+        scalar_t temp =
+            (this->inertia * velocity[j]) +
+            // cognitive update - this should be based on better
+            // particle of each 2 particle pairs
+            this->cognitive_coef * r_p * (pairwise_best[j] - particle[j]) +
+            // social update (moving more if further away from 'best' position)
+            this->social_coef * r_g * (best[j] - particle[j]);
+        if constexpr (bound) {
+          temp = std::clamp(temp, lower[i], upper[i]);
+        }
+        velocity[j] = temp;
+        particle[j] += temp;
+      }
+      // rerun function evaluation
+      this->particle_current_values[id] = f_multiplier * f(particle);
+      this->function_calls_used++;
+    }
+  }
+  void update_centroid(std::vector<scalar_t> &centroid,
+                       const std::vector<size_t> &current_order,
+                       const size_t last_point) {
+    // reset centroid - fill with 0
+    std::fill(centroid.begin(), centroid.end(), 0.0);
+    // iterate through 0 to last_point - 1 - last point taken to be the Nth
+    // best point in an N+1 dimensional simplex
+    size_t i = 0;
+    for (; i < last_point; i++) {
+      const std::vector<scalar_t> &particle =
+          this->particle_positions[current_order[i]];
+      // TODO(JSzitas): SIMD Candidate
+      for (size_t j = 0; j < centroid.size(); j++) {
+        centroid[j] += particle[j];
+      }
+    }
+    for (auto &val : centroid) val /= static_cast<scalar_t>(i);
+  }
+  void shrink(const std::vector<size_t> &current_order, const scalar_t sigma_,
+              const size_t nm_particles, const size_t n_dim) {
+    // take a reference to the best vector
+    const std::vector<scalar_t> &best =
+        this->particle_positions[current_order[0]];
+    for (size_t i = 1; i < nm_particles; i++) {
+      // update all items in current vector using the best vector -
+      // hopefully the contiguous data here can help a bit with cache
+      // locality
+      std::vector<scalar_t> &current =
+          this->particle_positions[current_order[i]];
+      // TODO(JSzitas): SIMD Candidate
+      for (size_t j = 0; j < n_dim; j++) {
+        current[j] = best[j] + sigma_ * (current[j] - best[j]);
+      }
+    }
+  }
+  scalar_t simplex_std_err(const std::vector<size_t> &current_order,
+                           const size_t nm_particles) {
+    size_t i = 0;
+    scalar_t mean_val = 0, result = 0;
+    for (; i < nm_particles; i++) {
+      mean_val += this->particle_current_values[current_order[i]];
+    }
+    mean_val /= static_cast<scalar_t>(i);
+    i = 0;
+    for (; i < nm_particles; i++) {
+      result +=
+          pow(this->particle_current_values[current_order[i]] - mean_val, 2);
+    }
+    result /= (scalar_t)(i - 1);
+    return sqrt(result);
+  }
+};
+}  // namespace nlsolver
+
+namespace nlsolver::experimental {
 // TODO(JSzitas): WIP
 template <typename Callable, typename RNG, typename scalar_t = double>
 class [[maybe_unused]] CMAES {
@@ -3517,7 +4009,7 @@ class [[maybe_unused]] CMAES {
     // interface to f is
     std::vector<scalar_t> particles_x(n * la);
     // take iterator type and use it in the lambda
-    size_t f_evals = 1;
+    size_t f_evals = 0;
     using ItType = decltype(particles_x.begin());
     std::vector<scalar_t> temp_eval_vec = x;
     constexpr scalar_t f_multiplier = minimize ? -1.0 : 1.0;
@@ -3562,9 +4054,9 @@ class [[maybe_unused]] CMAES {
           // TODO(JSzitas): rewrite matrix product
           // row of BD with value in particles
           // scalar_t temp = 0.0;
-          // for(size_t i =0; k <n; k++) {
-          temp_vec[k] += BD[k * n + j] * particles_z[k * n + j];
-          //}
+          for (size_t i = 0; i < n; i++) {
+            temp_vec[k] += BD[i * n + j] * particles_z[i * n + j];
+          }
           particles_x[k * n + j] = x_mean[j] + sigma;  //* //temp;
         }
         // arx.col(k) = x_mean + sigma * B*D*arz.col(k);
@@ -3676,417 +4168,145 @@ class [[maybe_unused]] CMAES {
     }
   }
 };
-template <typename Callable, typename RNG, typename scalar_t = double>
-class NelderMeadPSO {
- private:
-  // user supplied
-  RNG &generator;
+template <typename Callable, typename scalar_t>
+class Brent {
   Callable &f;
-  // initialized once
-  const scalar_t alpha, gamma, rho, sigma, inertia, cognitive_coef, social_coef;
-  scalar_t eps;
-  // used during optimization
-  std::vector<std::vector<scalar_t>> particle_positions, particle_velocities;
-  std::vector<scalar_t> particle_current_values;
-  size_t restarts;
-  const size_t max_iter, no_change_best_iter;
-  // std::optional<std::vector<scalar_t>> lower, upper;
-  size_t function_calls_used = 0;
+  const scalar_t tol, eps;
+  const size_t max_iter;
 
  public:
-  // constructor
-  NelderMeadPSO(Callable &f, RNG &generator, const scalar_t alpha = 1,
-                const scalar_t gamma = 2, const scalar_t rho = 0.5,
-                const scalar_t sigma = 0.5, const scalar_t inertia = 0.8,
-                const scalar_t cognitive_coef = 1.8,
-                const scalar_t social_coef = 1.8, const scalar_t eps = 10e-4,
-                const size_t restarts = 5, const size_t max_iter = 1000,
-                const size_t no_change_best_iter = 20)
-      : generator(generator),
-        f(f),
-        alpha(alpha),
-        gamma(gamma),
-        rho(rho),
-        sigma(sigma),
-        inertia(inertia),
-        cognitive_coef(cognitive_coef),
-        social_coef(social_coef),
-        eps(eps),
-        restarts(restarts),
-        max_iter(max_iter),
-        no_change_best_iter(no_change_best_iter) {}
+  explicit Brent(Callable &f, const scalar_t tol = 1e-12,
+                 const scalar_t eps = 1e-12, const size_t max_iter = 200)
+      : f(f), tol(tol), eps(eps), max_iter(max_iter) {}
   // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(std::vector<scalar_t> &x) {
-    const size_t n_dim = x.size();
-    // compute implied upper and lower bounds
-    std::vector<scalar_t> lower(n_dim);
-    std::vector<scalar_t> upper(n_dim);
-    for (size_t i = 0; i < n_dim; i++) {
-      scalar_t temp = std::abs(x[i]);
-      lower[i] = -temp;
-      upper[i] = temp;
-    }
-    return this->solve<true, false>(x, upper, lower);
-  }
-  // maximize interface
-  [[maybe_unused]] solver_status<scalar_t> maximize(std::vector<scalar_t> &x) {
-    const size_t n_dim = x.size();
-    // compute implied upper and lower bounds
-    std::vector<scalar_t> lower(n_dim);
-    std::vector<scalar_t> upper(n_dim);
-    for (size_t i = 0; i < n_dim; i++) {
-      scalar_t temp = std::abs(x[i]);
-      lower[i] = -temp;
-      upper[i] = temp;
-    }
-    return this->solve<false, false>(x, upper, lower);
-  }
-  // minimize interface
-  [[maybe_unused]] solver_status<scalar_t> minimize(
-      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
-      const std::vector<scalar_t> &upper) {
-    return this->solve<true, true>(x, upper, lower);
+  [[maybe_unused]] solver_status<scalar_t> minimize(scalar_t &x,
+                                                    const scalar_t lower = -5,
+                                                    const scalar_t upper = 5) {
+    return this->solve<true>(x, upper, lower);
   }
   // maximize helper
-  [[maybe_unused]] solver_status<scalar_t> maximize(
-      std::vector<scalar_t> &x, const std::vector<scalar_t> &lower,
-      const std::vector<scalar_t> &upper) {
-    return this->solve<false, true>(x, upper, lower);
+  [[maybe_unused]] solver_status<scalar_t> maximize(scalar_t &x,
+                                                    const scalar_t lower = -5,
+                                                    const scalar_t upper = 5) {
+    return this->solve<false>(x, upper, lower);
   }
 
  private:
-  template <const bool minimize = true, const bool bound = false>
-  solver_status<scalar_t> solve(std::vector<scalar_t> &x,
-                                const std::vector<scalar_t> &upper,
-                                const std::vector<scalar_t> &lower) {
-    const size_t n_dim = x.size();
-    if (n_dim < 2) {
-      std::cout
-          << "You are trying to optimize a one dimensional function "
-          << "you should probably be using vanilla NelderMead (or vanilla PSO)"
-          << " - our implementation does not support this in the "
-             "NelderMead-PSO "
-          << "hybrid." << std::endl;
-      // return some invalid solver state
-      return solver_status<scalar_t>(999999, 0, 0);
-    }
-    // initialize solver state
-    const size_t n_simplex_particles = n_dim + 1, n_pso_particles = 2 * n_dim,
-                 n_particles = n_pso_particles + n_simplex_particles;
-    init_solver_state<minimize>(x, upper, lower, n_simplex_particles,
-                                n_pso_particles, n_dim);
-    // temporaries for the simplex
-    std::vector<scalar_t> centroid(n_dim), temp_reflect(n_dim),
-        temp_expand(n_dim);
-    // create an index for the current particle order (best to worst)
-    std::vector<size_t> current_order(n_particles);
-    std::iota(current_order.begin(), current_order.end(), 0);
-    size_t iter = 0, n_restarts = this->restarts;
-    scalar_t best_val = this->particle_current_values[0];
-    size_t best_val_no_change = 0;
-    while (true) {
-      // sort particles from best to worst
-      std::sort(current_order.begin(), current_order.end(),
-                [&](size_t left_id, size_t right_id) -> bool {
-                  return this->particle_current_values[left_id] <
-                         this->particle_current_values[right_id];
-                });
-      // record if best value was updated
-      const bool best_val_stayed_same =
-          best_val == this->particle_current_values[current_order[0]];
-      // this rolls together - increment by one or reset
-      best_val_no_change += best_val_stayed_same;
-      best_val_no_change *= best_val_stayed_same;
-      // simplex commonly gets stuck in local minima due to over-shrinkage -
-      // this 'restarts' the simplex - from current centroid
-      if (iter < max_iter && n_restarts > 0 &&
-          ((simplex_std_err(current_order, n_simplex_particles) < this->eps) ||
-           (best_val_no_change >= this->no_change_best_iter))) {
-        restart_simplex<minimize>(current_order, centroid, n_simplex_particles);
-        std::cout << "Restarting simplex." << std::endl;
-        best_val_no_change = 0;
-        n_restarts--;
-      }
-      // stopping criteria
-      if (iter >= this->max_iter ||
-          best_val_no_change >= this->no_change_best_iter ||
-          // this should be applied only over the simplex particles
-          this->simplex_std_err(current_order, n_simplex_particles) <
-              this->eps) {
-        x = this->particle_positions[current_order[0]];
-        // best scores, iteration number and function calls used total
-        return solver_status<scalar_t>(
-            this->particle_current_values[current_order[0]], iter,
-            this->function_calls_used);
-      }
-      // use top N+1 particles to form simplex and apply the simplex update
-      apply_simplex<minimize, bound>(centroid, temp_reflect, temp_expand,
-                                     current_order, n_simplex_particles, n_dim,
-                                     upper, lower);
-      // update the rest of the particles - i.e. the non-simplex ones
-      // using the regular PSO update
-      apply_pso<minimize, bound>(current_order, n_simplex_particles,
-                                 n_particles, n_dim, upper, lower);
-      iter++;
-    }
-  }
   template <const bool minimize = true>
-  void init_solver_state(const std::vector<scalar_t> &x,
-                         const std::vector<scalar_t> &upper,
-                         const std::vector<scalar_t> &lower,
-                         const size_t nm_particles, const size_t pso_particles,
-                         const size_t n_dim) {
-    const size_t n_particles = nm_particles + pso_particles;
-    this->particle_positions = std::vector<std::vector<scalar_t>>(n_particles);
-    this->particle_velocities = std::vector<std::vector<scalar_t>>(n_particles);
-    this->particle_current_values = std::vector<scalar_t>(n_particles);
-
-    this->function_calls_used = 0;
-    size_t i = 0;
-    for (; i < n_particles; i++) {
-      this->particle_positions[i] = std::vector<scalar_t>(n_dim);
-      this->particle_velocities[i] = std::vector<scalar_t>(n_dim, 0.0);
-    }
-    // create particles - first x.size() + 1 particles should be initialized
-    // as in NM; this follows Gao and Han, see:
-    // 'Proper initialization is crucial for the Nelder–Mead simplex search.'
-    // (2019), Wessing, S.  Optimization Letters 13, p. 847–856
-    // (also at https://link.springer.com/article/10.1007/s11590-018-1284-4)
-    particle_positions[0] = x;
-    for (i = 1; i < nm_particles; i++) {
-      scalar_t x_inf_norm = max_abs_vec(x);
-      // if smaller than 1, set to 1
-      scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
-      // if larger than 10, set to 10
-      scalar_t scale = a < 10 ? a : 10;
-      for (i = 1; i < nm_particles; i++) {
-        particle_positions[i] = x;
-        particle_positions[i][i] = x[i] + scale;
+  solver_status<scalar_t> solve(scalar_t &x_, const scalar_t upper,
+                                const scalar_t lower) {
+    // lightly adapted from R's C level Brent_fmin
+    // values
+    size_t f_evals_used = 0;
+    constexpr scalar_t f_mult = minimize ? 1.0 : -1.0;
+    // functor
+    auto f_lam = [&](auto x) {
+      const auto val = f_mult * this->f(x);
+      f_evals_used++;
+      return val;
+    };
+    /*  c is the squared inverse of the golden ratio */
+    const scalar_t c = (3. - std::sqrt(5.)) * .5;
+    /* Local variables */
+    scalar_t a, b, d, e, p, q, r, u, v, w, x, t2, fu, fv, fw, fx, xm, tol1,
+        tol3;
+    /*  eps is approximately the square root of the relative machine precision.
+     */
+    tol1 = eps + 1.; /* the smallest 1.000... > 1 */
+    a = lower;
+    b = upper;
+    v = a + c * (b - a);
+    w = v;
+    x = v;
+    d = 0.; /* -Wall */
+    e = 0.;
+    fx = f_lam(x);
+    fv = fx;
+    fw = fx;
+    tol3 = tol / 3.;
+    /*  main loop starts here ----------------------------------- */
+    size_t iter = 0;
+    for (; iter < max_iter; ++iter) {
+      xm = (a + b) * .5;
+      tol1 = eps * fabs(x) + tol3;
+      t2 = tol1 * 2.;
+      /* check stopping criterion */
+      if (std::fabs(x - xm) <= t2 - (b - a) * .5) break;
+      p = 0.;
+      q = 0.;
+      r = 0.;
+      if (std::fabs(e) > tol1) { /* fit parabola */
+        r = (x - w) * (fx - fv);
+        q = (x - v) * (fx - fw);
+        p = (x - v) * q - (x - w) * r;
+        q = (q - r) * 2.;
+        if (q > 0.) {
+          p = -p;
+        } else {
+          q = -q;
+        }
+        r = e;
+        e = d;
       }
-      // update first simplex point
-      auto n = static_cast<scalar_t>(x.size());
-      for (i = 0; i < x.size(); i++) {
-        particle_positions[0][i] = x[i] + ((1.0 - sqrt(n + 1.0)) / n * scale);
+      if (std::fabs(p) >= std::fabs(q * .5 * r) || p <= q * (a - x) ||
+          p >= q * (b - x)) { /* a golden-section step */
+        if (x < xm) {
+          e = b - x;
+        } else {
+          e = a - x;
+        }
+        d = c * e;
+      } else { /* a parabolic-interpolation step */
+        d = p / q;
+        u = x + d;
+        /* f must not be evaluated too close to ax or bx */
+        if (u - a < t2 || b - u < t2) {
+          d = tol1;
+          if (x >= xm) {
+            d = -d;
+          }
+        }
       }
-    }
-    // the rest according to PSO
-    for (i = nm_particles; i < n_particles; i++) {
-      for (size_t j = 0; j < n_dim; j++) {
-        // update velocities and positions
-        scalar_t temp = std::abs(upper[j] - lower[j]);
-        this->particle_positions[i][j] =
-            lower[j] + ((upper[j] - lower[j]) * generator());
-        this->particle_velocities[i][j] = -temp + (generator() * temp);
-      }
-    }
-    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
-    for (i = 0; i < n_particles; i++) {
-      this->particle_current_values[i] =
-          f_multiplier * f(particle_positions[i]);
-      this->function_calls_used++;
-    }
-  }
-  template <const bool minimize>
-  void restart_simplex(const std::vector<size_t> &current_order,
-                       const std::vector<scalar_t> &centroid,
-                       const size_t nm_particles) {
-    particle_positions[current_order[0]] = centroid;
-    size_t i = 1;
-    for (; i < nm_particles; i++) {
-      scalar_t x_inf_norm = max_abs_vec(centroid);
-      // if smaller than 1, set to 1
-      scalar_t a = x_inf_norm < 1.0 ? 1.0 : x_inf_norm;
-      // if larger than 10, set to 10
-      scalar_t scale = a < 10 ? a : 10;
-      for (i = 1; i < nm_particles; i++) {
-        particle_positions[i] = centroid;
-        particle_positions[i][i] = centroid[i] + scale;
-      }
-      // update first simplex point
-      auto n = static_cast<scalar_t>(centroid.size());
-      for (i = 0; i < centroid.size(); i++) {
-        // TODO(JSzitas): SIMD Candidate
-        particle_positions[current_order[0]][i] =
-            centroid[i] + ((1.0 - sqrt(n + 1.0)) / n * scale);
-      }
-    }
-    // recompute particle scores
-    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
-    for (i = 0; i < nm_particles; i++) {
-      this->particle_current_values[i] =
-          f_multiplier * f(this->particle_positions[current_order[i]]);
-    }
-    this->function_calls_used += nm_particles - 1;
-  }
-  template <const bool minimize, const bool bound>
-  void apply_simplex(std::vector<scalar_t> &centroid,
-                     std::vector<scalar_t> &temp_reflect,
-                     std::vector<scalar_t> &temp_expand,
-                     const std::vector<size_t> &current_order,
-                     const size_t nm_particles, const size_t n_dim,
-                     const std::vector<scalar_t> &upper,
-                     const std::vector<scalar_t> &lower) {
-    const scalar_t best_score = this->particle_current_values[0];
-    const size_t worst_id = current_order[nm_particles - 1];
-    const size_t second_worst_id = current_order[nm_particles - 2];
-    // update centroid of all points except for the worst one
-    this->update_centroid(centroid, current_order, nm_particles - 1);
-    // reflect worst point
-    simplex_transform<scalar_t, true, bound>(
-        this->particle_positions[nm_particles - 1], centroid, temp_reflect,
-        this->alpha, upper, lower);
-    // set constant multiplier for minimization
-    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
-    // score reflected point
-    const scalar_t ref_score = f_multiplier * f(temp_reflect);
-    this->function_calls_used++;
-    // if reflected point is better than second worst, but not better than best
-    if (ref_score >= best_score &&
-        ref_score < this->particle_current_values[second_worst_id]) {
-      this->particle_positions[worst_id] = temp_reflect;
-      // otherwise if this is the best score so far, expand
-    } else if (ref_score < best_score) {
-      simplex_transform<scalar_t, false, bound>(
-          temp_reflect, centroid, temp_expand, this->gamma, upper, lower);
-      // obtain score for expanded point
-      const scalar_t exp_score = f_multiplier * f(temp_expand);
-      this->function_calls_used++;
-      // if this is better than the expanded point score, replace the worst
-      // point with the expanded point, otherwise replace it with
-      // the reflected point
-      std::vector<scalar_t> &replacement =
-          exp_score < ref_score ? temp_expand : temp_reflect;
-      this->particle_positions[worst_id] = replacement;
-      this->particle_current_values[worst_id] =
-          exp_score < ref_score ? exp_score : ref_score;
-      // otherwise we have a point  worse than the 'second worst'
-    } else {
-      // contract outside - here we overwrite the 'temp_expand' and it
-      // functionally becomes 'temp_contract'
-      const scalar_t worst_score = this->particle_current_values[worst_id];
-      simplex_transform<scalar_t, false, bound>(
-          ref_score < worst_score
-              ? temp_reflect
-              :
-              // or point is the worst point so far - contract inside
-              this->particle_positions[worst_id],
-          centroid, temp_expand, this->rho, upper, lower);
-      const scalar_t cont_score = f_multiplier * f(temp_expand);
-      this->function_calls_used++;
-      // if this contraction is better than the reflected point or worst point
-      if (cont_score < (ref_score < worst_score ? ref_score : worst_score)) {
-        // replace worst point with contracted point
-        this->particle_positions[worst_id] = temp_expand;
-        this->particle_current_values[worst_id] = cont_score;
-        // otherwise shrink
+      /* f must not be evaluated too close to x */
+      if (std::fabs(d) >= tol1) {
+        u = x + d;
+      } else if (d > 0.) {
+        u = x + tol1;
       } else {
-        // if we had not violated the bounds before shrinking, shrinking
-        // will not cause new violations - hence no bounds applied here
-        shrink(current_order, this->sigma, nm_particles, n_dim);
-        // only in this case do we have to score again
-        for (size_t i = 1; i < nm_particles; i++) {
-          this->particle_current_values[i] =
-              f_multiplier * f(this->particle_positions[current_order[i]]);
+        u = x - tol1;
+      }
+      fu = f_lam(u);
+      /*  update  a, b, v, w, and x */
+      if (fu <= fx) {
+        if (u < x)
+          b = x;
+        else
+          a = x;
+        v = w;
+        w = x;
+        x = u;
+        fv = fw;
+        fw = fx;
+        fx = fu;
+      } else {
+        if (u < x) {
+          a = u;
+        } else {
+          b = u;
         }
-        this->function_calls_used += nm_particles - 1;
-      }
-    }
-  }
-  template <const bool minimize, const bool bound>
-  void apply_pso(const std::vector<size_t> &current_order,
-                 const size_t n_simplex_particles,
-                 const size_t n_total_particles, const size_t n_dim,
-                 const std::vector<scalar_t> &upper,
-                 const std::vector<scalar_t> &lower) {
-    constexpr scalar_t f_multiplier = minimize ? 1.0 : -1.0;
-    bool order_flip = false;
-    size_t best_in_pair = current_order[n_simplex_particles];
-    const std::vector<scalar_t> &best =
-        this->particle_positions[current_order[0]];
-    for (size_t i = n_simplex_particles; i < n_total_particles; i++) {
-      const size_t id = current_order[i];
-      if (order_flip) {
-        best_in_pair = current_order[i + 1];
-      }
-      order_flip = static_cast<bool>((i - n_simplex_particles) % 2);
-      // get references to current particle, current velocity and pairwise best
-      // particle
-      std::vector<scalar_t> &particle = particle_positions[id],
-                            velocity = this->particle_velocities[id],
-                            pairwise_best = particle_positions[best_in_pair];
-      for (size_t j = 0; j < n_dim; j++) {
-        // generate random movements
-        const scalar_t r_p = generator(), r_g = generator();
-        // update current velocity for current particle - inertia update
-        // TODO(JSzitas): SIMD Candidate
-        scalar_t temp =
-            (this->inertia * velocity[j]) +
-            // cognitive update - this should be based on better
-            // particle of each 2 particle pairs
-            this->cognitive_coef * r_p * (pairwise_best[j] - particle[j]) +
-            // social update (moving more if further away from 'best' position)
-            this->social_coef * r_g * (best[j] - particle[j]);
-        if constexpr (bound) {
-          temp = std::clamp(temp, lower[i], upper[i]);
+        if (fu <= fw || w == x) {
+          v = w;
+          fv = fw;
+          w = u;
+          fw = fu;
+        } else if (fu <= fv || v == x || v == w) {
+          v = u;
+          fv = fu;
         }
-        velocity[j] = temp;
-        particle[j] += temp;
-      }
-      // rerun function evaluation
-      this->particle_current_values[id] = f_multiplier * f(particle);
-      this->function_calls_used++;
-    }
-  }
-  void update_centroid(std::vector<scalar_t> &centroid,
-                       const std::vector<size_t> &current_order,
-                       const size_t last_point) {
-    // reset centroid - fill with 0
-    std::fill(centroid.begin(), centroid.end(), 0.0);
-    // iterate through 0 to last_point - 1 - last point taken to be the Nth
-    // best point in an N+1 dimensional simplex
-    size_t i = 0;
-    for (; i < last_point; i++) {
-      const std::vector<scalar_t> &particle =
-          this->particle_positions[current_order[i]];
-      // TODO(JSzitas): SIMD Candidate
-      for (size_t j = 0; j < centroid.size(); j++) {
-        centroid[j] += particle[j];
       }
     }
-    for (auto &val : centroid) val /= (scalar_t)i;
-  }
-  void shrink(const std::vector<size_t> &current_order, const scalar_t sigma_,
-              const size_t nm_particles, const size_t n_dim) {
-    // take a reference to the best vector
-    const std::vector<scalar_t> &best =
-        this->particle_positions[current_order[0]];
-    for (size_t i = 1; i < nm_particles; i++) {
-      // update all items in current vector using the best vector -
-      // hopefully the contiguous data here can help a bit with cache
-      // locality
-      std::vector<scalar_t> &current =
-          this->particle_positions[current_order[0]];
-      // TODO(JSzitas): SIMD Candidate
-      for (size_t j = 0; j < n_dim; j++) {
-        current[j] = best[j] + sigma_ * (current[j] - best[j]);
-      }
-    }
-  }
-  scalar_t simplex_std_err(const std::vector<size_t> &current_order,
-                           const size_t nm_particles) {
-    size_t i = 0;
-    scalar_t mean_val = 0, result = 0;
-    for (; i < nm_particles; i++) {
-      mean_val += this->particle_current_values[current_order[i]];
-    }
-    mean_val /= (scalar_t)i;
-    i = 0;
-    for (; i < nm_particles; i++) {
-      result +=
-          pow(this->particle_current_values[current_order[i]] - mean_val, 2);
-    }
-    result /= (scalar_t)(i - 1);
-    return sqrt(result);
+    x_ = fx;
+    return solver_status<scalar_t>(x, iter, f_evals_used);
   }
 };
 }  // namespace nlsolver::experimental
