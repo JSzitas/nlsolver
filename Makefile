@@ -8,7 +8,9 @@ debug_simd:
 	clang++ -std=c++17 -O3 -g -Wall simd_debug.cpp -o simd_debug
 example_simd:
 	clang++ -std=c++17 -O0 -g -Wall -march=native example.cpp -o example_simd
+test:
+	clang++ -std=c++17 -O2 -g -Wall tests.cpp -o tests; ./tests; rm tests
 clean:
-	rm -rf debug example example_simd simd_debug
+	rm -rf debug example example_simd simd_debug, tests
 
 
