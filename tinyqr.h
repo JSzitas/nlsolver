@@ -348,10 +348,10 @@ template <typename scalar_t>
   Ak.resize(n);
   return {Ak, QQ};
 }
-template <typename scalar_t, const bool compute_sqrt_eigval = false>
+template <typename scalar_t>
 class [[maybe_unused]] QRSolver {
   const size_t n;
-  std::vector<scalar_t> Ak, QQ, Q, R, temp, eigval, sqrt_eigval;
+  std::vector<scalar_t> Ak, QQ, Q, R, temp, eigval;
 
  public:
   [[maybe_unused]] explicit QRSolver<scalar_t>(const size_t n) : n(n) {
@@ -407,21 +407,9 @@ class [[maybe_unused]] QRSolver {
     for (size_t i = 0; i < n; i++) {
       eigval[i] = Ak[i * n + i];
     }
-    if constexpr (compute_sqrt_eigval) {
-      this->sqrt_eigval = std::transform(eigval.begin(), eigval.end(),
-                                         std::back_inserter(this->sqrt_eigval),
-                                         [](auto &x) { return std::sqrt(x); });
-    }
   }
   [[maybe_unused]] const std::vector<scalar_t> &eigenvalues() const {
     return eigval;
-  }
-  [[maybe_unused]] const std::vector<scalar_t> &sqrt_eigenvalues() const {
-    return sqrt_eigval;
-  }
-  [[maybe_unused]] scalar_t eigenvalue_condition_number() const {
-    return *std::max_element(sqrt_eigval.begin(), sqrt_eigval.end()) /
-           *std::min_element(sqrt_eigval.begin(), sqrt_eigval.end());
   }
   [[maybe_unused]] const std::vector<scalar_t> &eigenvectors() const {
     return this->QQ;

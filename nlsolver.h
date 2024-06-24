@@ -4027,7 +4027,7 @@ class [[maybe_unused]] CMAES {
     };
     size_t iter = 0;
     // initialize QRSolver
-    auto qr = tinyqr::QRSolver<scalar_t, true>(n);
+    auto qr = tinyqr::QRSolver<scalar_t>(n);
     // allocate BD and initialize it to identity matrix
     std::vector<scalar_t> BD(n * n, 0.0);
     for (size_t i = 0; i < n; ++i) {
