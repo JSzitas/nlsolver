@@ -35,6 +35,7 @@ using nlsolver::LevenbergMarquardt;
 // experimental solvers
 // uni-variate optimizer
 using nlsolver::experimental::Brent;
+using nlsolver::experimental::Ridders;
 
 // RNG
 using nlsolver::rng::xorshift;
@@ -266,11 +267,25 @@ int main() {
   // uni-variate optimization example
   std::cout << "Brent for finding the BoxCox transform lambda parameter"
             << std::endl;
-  Guerrero<double> box_cox_lambda;
-  Brent<Guerrero<double>, double> brent_solver(box_cox_lambda);
+  // Guerrero<double> box_cox_lambda;
+  struct Problem {
+    double operator()(const double x) {
+      // return std::pow(x,2)/12 + x -4;
+      return std::pow(x, 4) - 2 * std::pow(x, 2) + 1 / 4;
+    }
+  };
+
+  Problem p;
+  Brent<Problem, double> brent_solver(p);
   double x = 1.2;
-  auto result = brent_solver.minimize(x, -5, 5);
+  auto result = brent_solver.minimize(x, 0, 1);  // 1, 5);
   result.print();
+  std::cout << "x: " << x << std::endl;
+
+  Ridders<Problem, double> ridders_solver(p);
+  x = 1.2;
+  auto result2 = ridders_solver.minimize(x, 0, 1);  // 1, 5);
+  result2.print();
   std::cout << "x: " << x << std::endl;
 
   std::cout << "Levenberg-Marquardt (always requires hessian)" << std::endl;
