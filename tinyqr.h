@@ -59,13 +59,12 @@ inline __attribute__((always_inline)) scalar_t inv_sqrt(scalar_t x) {
 }
 // fast inverse square root - might buy us a tiny bit, and I have been looking
 // for forever to use this :)
-/*
 template <>
 [[maybe_unused]] inline __attribute__((always_inline)) float inv_sqrt(float x) {
-  long i = *reinterpret_cast<long *>(&x);       // evil floating point bit level
-hacking // NOLINT [runtime/int] i = 0x5f3759df - (i >> 1);  // what the fuck?
+  long i = *reinterpret_cast<long *>(&x); // NOLINT [runtime/int]
+  i = 0x5f3759df - (i >> 1);
   return *reinterpret_cast<float *>(&i);
-}*/
+}
 template <typename scalar_t>
 inline __attribute__((always_inline)) std::tuple<scalar_t, scalar_t>
 givens_rotation(const scalar_t a, const scalar_t b) {
