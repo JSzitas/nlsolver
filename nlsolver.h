@@ -38,6 +38,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 #include "./tinyqr.h"
 
@@ -3570,8 +3571,8 @@ class NelderMeadPSO {
       const scalar_t gamma = 2, const scalar_t rho = 0.5,
       const scalar_t sigma = 0.5, const scalar_t inertia = 0.8,
       const scalar_t cognitive_coef = 1.8, const scalar_t social_coef = 1.8,
-      const scalar_t eps = 1e-6, const size_t restarts = 0,
-      const size_t max_iter = 1000, const size_t no_change_best_iter = 20)
+      const scalar_t eps = 1e-6, const size_t max_iter = 1000,
+      const size_t no_change_best_iter = 20)
       : generator(generator),
         f(f),
         alpha(alpha),
@@ -4254,7 +4255,6 @@ template <typename Callable, typename scalar_t>
                                                const scalar_t lower,
                                                const scalar_t upper,
                                                const scalar_t tol = 1e-12,
-                                               const scalar_t eps = 1e-12,
                                                const size_t max_iter = 200) {
   size_t f_evals_used = 0;
   // functor
@@ -4315,7 +4315,6 @@ template <typename Callable, typename scalar_t>
     }
     iter++;
   }
-  return solver_status<scalar_t>(10000000.0, 0, f_evals_used);
 }
 
 template <typename Callable, typename scalar_t>
@@ -4345,17 +4344,12 @@ template <typename Callable, typename scalar_t>
     // form an evaluate at midpoint
     // evaluate at midpoint
     mid = (a + b) / 2, val_mid = f_lam(mid);
-    std::cout << "Mid  " << mid << std::endl;
-    std::cout << "Iterate: " << std::pow(val_mid, 2) - (val_a * val_b)
-              << std::endl;
     // new iterate
     new_mid =
         mid + (mid - a) * (std::copysign(1., val_a - val_b) * val_mid /
                            std::sqrt(std::pow(val_mid, 2) - (val_a * val_b)));
-    std::cout << "New mid  " << new_mid << std::endl;
     // check if equal zero, if yes return
     scalar_t val_new_mid = f_lam(new_mid);
-    std::cout << "Val new mid: " << val_new_mid << std::endl;
     // check tolerances
     if (std::min(std::abs(new_mid - a), std::abs(new_mid - b)) < tol ||
         std::abs(val_new_mid) < eps || iter >= max_iter) {
@@ -4396,16 +4390,6 @@ struct fixed_circulant {
     this->circle_index = (this->circle_index + 1) % size;
   }
   auto last() { return this->data[this->circle_index]; }
-  /*void print(const size_t i) {
-    std::cout << "Index " << i << " value: " << this->data[(this->circle_index +
-  i) % size] << std::endl;
-  }
-  void print() {
-    for(size_t j = 0; j < size; j++) {
-      std::cout << this->data[j] << ", ";
-    }
-    std::cout << std::endl;
-  }*/
 };
 };  // namespace circulant
 template <typename Callable, typename scalar_t>

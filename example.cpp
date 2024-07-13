@@ -32,11 +32,6 @@ using nlsolver::NelderMeadPSO;
 // also Levenberg - Marquardt for non-linear least squares
 using nlsolver::LevenbergMarquardt;
 
-// experimental solvers
-// uni-variate optimizer
-using nlsolver::experimental::Brent;
-using nlsolver::experimental::Ridders;
-
 // RNG
 using nlsolver::rng::xorshift;
 using nlsolver::rng::xoshiro;
@@ -274,19 +269,6 @@ int main() {
       return std::pow(x, 4) - 2 * std::pow(x, 2) + 1 / 4;
     }
   };
-
-  Problem p;
-  Brent<Problem, double> brent_solver(p);
-  double x = 1.2;
-  auto result = brent_solver.minimize(x, 0, 1);  // 1, 5);
-  result.print();
-  std::cout << "x: " << x << std::endl;
-
-  Ridders<Problem, double> ridders_solver(p);
-  x = 1.2;
-  auto result2 = ridders_solver.minimize(x, 0, 1);  // 1, 5);
-  result2.print();
-  std::cout << "x: " << x << std::endl;
 
   std::cout << "Levenberg-Marquardt (always requires hessian)" << std::endl;
   auto lm_solver = LevenbergMarquardt<Rosenbrock, double>(prob);
