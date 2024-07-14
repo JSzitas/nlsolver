@@ -32,6 +32,15 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+// inlining
+#define INLINE_THIS
+#if defined(__clang__) || defined(__GNUC__)
+#undef INLINE_THIS
+#define INLINE_THIS __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#undef INLINE_THIS
+#define INLINE_THIS __forceinline
+#endif
 
 // vectorised math macros
 #if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
@@ -54,20 +63,20 @@
 namespace tinyqr::internal {
 // since we are using 1/sqrt(x) here - default
 template <typename scalar_t>
-inline __attribute__((always_inline)) scalar_t inv_sqrt(scalar_t x) {
+inline INLINE_THIS scalar_t inv_sqrt(scalar_t x) {
   return 1.0 / std::sqrt(x);
 }
 // fast inverse square root - might buy us a tiny bit, and I have been looking
 // for forever to use this :)
 template <>
-[[maybe_unused]] inline __attribute__((always_inline)) float inv_sqrt(float x) {
-  long i = *reinterpret_cast<long *>(&x); // NOLINT [runtime/int]
+[[maybe_unused]] inline INLINE_THIS float inv_sqrt(float x) {
+  long i = *reinterpret_cast<long *>(&x);  // NOLINT [runtime/int]
   i = 0x5f3759df - (i >> 1);
   return *reinterpret_cast<float *>(&i);
 }
 template <typename scalar_t>
-inline __attribute__((always_inline)) std::tuple<scalar_t, scalar_t>
-givens_rotation(const scalar_t a, const scalar_t b) {
+inline INLINE_THIS std::tuple<scalar_t, scalar_t> givens_rotation(
+    const scalar_t a, const scalar_t b) {
   if (std::abs(b) > std::abs(a)) {
     const scalar_t r = a / b;
     const auto s = static_cast<scalar_t>(inv_sqrt(std::pow(r, 2) + 1.0));
@@ -79,7 +88,7 @@ givens_rotation(const scalar_t a, const scalar_t b) {
 }
 
 template <typename scalar_t>
-[[maybe_unused]] inline __attribute__((always_inline)) void tA_matmul_B_to_C(
+[[maybe_unused]] inline INLINE_THIS void tA_matmul_B_to_C(
     std::vector<scalar_t> &__restrict__ A,
     std::vector<scalar_t> &__restrict__ B,
     std::vector<scalar_t> &__restrict__ C, const size_t ncol) {
@@ -95,8 +104,8 @@ template <typename scalar_t>
 }
 // transpose a square matrix in place
 template <typename scalar_t>
-inline __attribute__((always_inline)) void transpose_square(
-    std::vector<scalar_t> &X, const size_t p) {
+inline INLINE_THIS void transpose_square(std::vector<scalar_t> &X,
+                                         const size_t p) {
   for (size_t i = 0; i < p; i++) {
     for (size_t j = i + 1; j < p; j++) {
       std::swap(X[(j * p) + i], X[(i * p) + j]);
@@ -106,9 +115,10 @@ inline __attribute__((always_inline)) void transpose_square(
 // TODO(JSzitas): All of the following code supports SIMD
 // and this impl should make it a lot easier
 template <typename scalar_t>
-inline __attribute__((always_inline)) void rotate_matrix(
-    scalar_t *__restrict__ lower, scalar_t *__restrict__ upper,
-    const scalar_t c, const scalar_t s, size_t p) {
+inline INLINE_THIS void rotate_matrix(scalar_t *__restrict__ lower,
+                                      scalar_t *__restrict__ upper,
+                                      const scalar_t c, const scalar_t s,
+                                      size_t p) {
   for (; p > 0; --p) {
     const scalar_t temp_1 = *lower;
     const scalar_t temp_2 = *upper;
@@ -121,9 +131,9 @@ inline __attribute__((always_inline)) void rotate_matrix(
 
 #ifdef USE_AVX
 template <>
-inline __attribute__((always_inline)) void rotate_matrix(
-    float *__restrict__ lower, float *__restrict__ upper, const float c,
-    const float s, size_t p) {
+inline INLINE_THIS void rotate_matrix(float *__restrict__ lower,
+                                      float *__restrict__ upper, const float c,
+                                      const float s, size_t p) {
   if (p > 7) {
     const __m256 c_ = _mm256_set1_ps(c);
     const __m256 s_ = _mm256_set1_ps(s);
@@ -156,9 +166,9 @@ inline __attribute__((always_inline)) void rotate_matrix(
 #endif
 #ifdef USE_AVX_512
 template <>
-inline __attribute__((always_inline)) void rotate_matrix(
-    float *__restrict__ lower, float *__restrict__ upper, const float c,
-    const float s, size_t p) {
+inline INLINE_THIS void rotate_matrix(float *__restrict__ lower,
+                                      float *__restrict__ upper, const float c,
+                                      const float s, size_t p) {
   if (p > 15) {
     const __m512 c_ = _mm512_set1_ps(c);
     const __m512 s_ = _mm512_set1_ps(s);
@@ -191,8 +201,7 @@ inline __attribute__((always_inline)) void rotate_matrix(
 #endif
 
 template <typename scalar_t>
-inline __attribute__((always_inline)) std::vector<scalar_t> make_identity(
-    const size_t n) {
+inline INLINE_THIS std::vector<scalar_t> make_identity(const size_t n) {
   std::vector<scalar_t> result(n * n, static_cast<scalar_t>(0.0));
   for (size_t i = 0; i < n; i++) result[i * n + i] = static_cast<scalar_t>(1.0);
   return result;

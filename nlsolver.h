@@ -23,13 +23,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma clang diagnostic push
 #ifndef NLSOLVER_H_
 #define NLSOLVER_H_
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#endif
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -38,7 +42,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <cstdint>
 
 #include "./tinyqr.h"
 
@@ -1173,10 +1176,7 @@ template <>
 }  // namespace nlsolver::math
 
 namespace nlsolver::rng {
-
-#include <cstdint>
 #define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
-
 template <typename scalar_t = float>
 struct [[maybe_unused]] halton {
   explicit halton<scalar_t>(const scalar_t base = 2)
@@ -4500,5 +4500,7 @@ template <typename Callable, typename scalar_t>
 }
 };  // namespace nlsolver::experimental::rootfinder
 
-#endif  // NLSOLVER_H_
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
+#endif  // NLSOLVER_H_
