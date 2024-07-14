@@ -41,6 +41,15 @@
 #undef INLINE_THIS
 #define INLINE_THIS __forceinline
 #endif
+// restrict
+#define RESTRICT_THIS
+#if defined(__clang__) || defined(__GNUC__)
+#undef RESTRICT_THIS
+#define RESTRICT_THIS __restrict__
+#elif defined(_MSC_VER)
+#undef RESTRICT_THIS
+#define RESTRICT_THIS __restrict
+#endif
 
 // vectorised math macros
 #if !defined(NO_MANUAL_VECTORIZATION) && defined(__GNUC__) && \
@@ -89,9 +98,9 @@ inline INLINE_THIS std::tuple<scalar_t, scalar_t> givens_rotation(
 
 template <typename scalar_t>
 [[maybe_unused]] inline INLINE_THIS void tA_matmul_B_to_C(
-    std::vector<scalar_t> &__restrict__ A,
-    std::vector<scalar_t> &__restrict__ B,
-    std::vector<scalar_t> &__restrict__ C, const size_t ncol) {
+    std::vector<scalar_t> &RESTRICT_THIS A,
+    std::vector<scalar_t> &RESTRICT_THIS B,
+    std::vector<scalar_t> &RESTRICT_THIS C, const size_t ncol) {
   for (size_t k = 0; k < ncol; k++) {
     for (size_t l = 0; l < ncol; l++) {
       scalar_t accumulator = 0.0;
@@ -115,8 +124,8 @@ inline INLINE_THIS void transpose_square(std::vector<scalar_t> &X,
 // TODO(JSzitas): All of the following code supports SIMD
 // and this impl should make it a lot easier
 template <typename scalar_t>
-inline INLINE_THIS void rotate_matrix(scalar_t *__restrict__ lower,
-                                      scalar_t *__restrict__ upper,
+inline INLINE_THIS void rotate_matrix(scalar_t *RESTRICT_THIS lower,
+                                      scalar_t *RESTRICT_THIS upper,
                                       const scalar_t c, const scalar_t s,
                                       size_t p) {
   for (; p > 0; --p) {
@@ -131,8 +140,8 @@ inline INLINE_THIS void rotate_matrix(scalar_t *__restrict__ lower,
 
 #ifdef USE_AVX
 template <>
-inline INLINE_THIS void rotate_matrix(float *__restrict__ lower,
-                                      float *__restrict__ upper, const float c,
+inline INLINE_THIS void rotate_matrix(float *RESTRICT_THIS lower,
+                                      float *RESTRICT_THIS upper, const float c,
                                       const float s, size_t p) {
   if (p > 7) {
     const __m256 c_ = _mm256_set1_ps(c);
@@ -166,8 +175,8 @@ inline INLINE_THIS void rotate_matrix(float *__restrict__ lower,
 #endif
 #ifdef USE_AVX_512
 template <>
-inline INLINE_THIS void rotate_matrix(float *__restrict__ lower,
-                                      float *__restrict__ upper, const float c,
+inline INLINE_THIS void rotate_matrix(float *RESTRICT_THIS lower,
+                                      float *RESTRICT_THIS upper, const float c,
                                       const float s, size_t p) {
   if (p > 15) {
     const __m512 c_ = _mm512_set1_ps(c);
@@ -208,9 +217,9 @@ inline INLINE_THIS std::vector<scalar_t> make_identity(const size_t n) {
 }
 template <typename scalar_t, const bool report_success = true,
           const size_t tune = 1000>
-[[maybe_unused]] void validate_qr(const std::vector<scalar_t> &__restrict__ X,
-                                  const std::vector<scalar_t> &__restrict__ Q,
-                                  const std::vector<scalar_t> &__restrict__ R,
+[[maybe_unused]] void validate_qr(const std::vector<scalar_t> &RESTRICT_THIS X,
+                                  const std::vector<scalar_t> &RESTRICT_THIS Q,
+                                  const std::vector<scalar_t> &RESTRICT_THIS R,
                                   const size_t n, const size_t p) {
   // constant factor here added since epsilon is too small otherwise
   constexpr auto eps =
@@ -242,8 +251,8 @@ template <typename scalar_t, const bool report_success = true,
   }
 }
 template <typename scalar_t, const bool cleanup = false>
-void qr_impl(std::vector<scalar_t> &__restrict__ Q,
-             std::vector<scalar_t> &__restrict__ R, const size_t n,
+void qr_impl(std::vector<scalar_t> &RESTRICT_THIS Q,
+             std::vector<scalar_t> &RESTRICT_THIS R, const size_t n,
              const size_t p, const scalar_t tol) {
   // the key to optimizing this is probably to take R as R transposed - most
   // likely a lot of work is done just in the k loops, which is probably a good
@@ -426,9 +435,9 @@ class [[maybe_unused]] QRSolver {
 // Function for back substitution using QR decomposition result
 // this does not require any temporaries
 template <typename scalar_t>
-std::vector<scalar_t> back_solve(const std::vector<scalar_t> &__restrict__ Q,
-                                 const std::vector<scalar_t> &__restrict__ R,
-                                 const std::vector<scalar_t> &__restrict__ y,
+std::vector<scalar_t> back_solve(const std::vector<scalar_t> &RESTRICT_THIS Q,
+                                 const std::vector<scalar_t> &RESTRICT_THIS R,
+                                 const std::vector<scalar_t> &RESTRICT_THIS y,
                                  const size_t nrow, const size_t ncol) {
   std::vector<scalar_t> result(ncol, 0.0);
   for (size_t i = ncol; i-- > 0;) {
@@ -450,8 +459,8 @@ std::vector<scalar_t> back_solve(const std::vector<scalar_t> &__restrict__ Q,
 }
 template <typename scalar_t>
 [[maybe_unused]] std::vector<scalar_t> lm(
-    const std::vector<scalar_t> &__restrict__ X,
-    const std::vector<scalar_t> &__restrict__ y, const scalar_t tol = 1e-12) {
+    const std::vector<scalar_t> &RESTRICT_THIS X,
+    const std::vector<scalar_t> &RESTRICT_THIS y, const scalar_t tol = 1e-12) {
   const size_t nrow = y.size();
   const size_t ncol = X.size() / nrow;
   // compute QR decomposition
