@@ -25,19 +25,38 @@ Just copy the header into your project, include and use:
 * Nelder-Mead PSO hybrid
   + Might under-perform other solvers, but should do better than vanilla Nelder-Mead on problems with 
   many local minima where Nelder-Mead can get stuck
+  + Tends to not be as resource hungry as either of the three previous methods
 * Gradient Descent 
   + Several flavours, including Vanilla with fixed steps, optimized using MoreThuente linesearch, 
   and even an implementation of [Provably Faster Gradient Descent via Long Steps](https://arxiv.org/abs/2307.06324) 
   in case you have a particularly well-behaved smooth convex problem.
-  
-## Experimental 
-  
-## Work in progress
-* CVA-ES 
 * BFGS
-  + probably based on existing work in e.g. https://github.com/PatWie/CppNumericalSolvers, but still 
-    dependency free
-* LMA     
+  + fairly standard, but somewhat optimized 
+
+## Root finding 
+For one dimensional problems and finding roots of polynomials, the following methods are supported: 
+ * Brent's method
+ * Bisection
+ * False Position
+ * ITP 
+ * Ridders' method
+ * Tiruneh's method
+
+See `roots.cpp` or run `make roots` via the command line for an example across three problems;
+Generally I would recommend running Brent if you do not really know much about your problem; 
+otherwise ITP can usually be somewhat fast and reliable. 
+
+If you have good previous guesses for the root (such as when iteratively optimizing closely related polynomials), Tiruneh's method
+(see here: https://arxiv.org/abs/1902.09058) is incredibly hard to beat, and very reliable.
+
+## Experimental 
+* Levenberg-Marquardt
+  + semi-experimental; hasn't really been validated beyond a few simple cases  
+
+## Work in progress
+Primarily for hyperparameter optimization, 
+* CMA-ES
+* Parzen Trees   
     
 # Roadmap 
 

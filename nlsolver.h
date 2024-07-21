@@ -3926,6 +3926,407 @@ class NelderMeadPSO {
 };
 }  // namespace nlsolver
 
+namespace nlsolver::rootfinder {
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> bisection(
+    Callable &f, scalar_t &x, const scalar_t lower = -100,
+    const scalar_t upper = 100, const scalar_t eps = 1e-6,
+    const size_t max_iter = 200) {
+  size_t f_evals_used = 0;
+  auto f_lam = [&](auto x) {
+    auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t a = lower, b = upper;
+  if (a > b) {
+    std::swap(a, b);
+  }
+  if (f_lam(a) * f_lam(b) >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  scalar_t mid, val;
+  size_t iter = 0;
+  while (true) {
+    // define midpoint
+    mid = (a + b) / 2;
+    val = f_lam(mid);
+    if (std::abs(val) < eps || iter > max_iter) {
+      //; solution found
+      x = mid;
+      return solver_status<scalar_t>(val, iter, f_evals_used);
+    }
+    if (val > 0) {
+      b = mid;
+    } else if (val < 0) {
+      a = mid;
+    }
+    iter++;
+  }
+}
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> false_position(
+    Callable &f, scalar_t &x, const scalar_t lower = -100,
+    const scalar_t upper = 100, const scalar_t eps = 1e-6,
+    const size_t max_iter = 200) {
+  size_t f_evals_used = 0;
+  auto f_lam = [&](auto x) {
+    auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t val_a = f_lam(lower), val_b = f_lam(upper);
+  if (val_a * val_b >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  scalar_t a = lower, b = upper, mid, val;
+  size_t iter = 0;
+  while (true) {
+    // define midpoint
+    mid = a + ((b - a) * val_a) / (val_a - val_b);
+    val = f_lam(mid);
+    if (std::abs(val) < eps || iter > max_iter) {
+      //; solution found
+      x = mid;
+      return solver_status<scalar_t>(val, iter, f_evals_used);
+    }
+    if (val < 0) {
+      a = mid;
+      val_a = val;
+    } else if (val > 0) {
+      b = mid;
+      val_b = mid;
+    }
+    iter++;
+  }
+}
+
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> brent(Callable &f, scalar_t &x,
+                                               const scalar_t lower,
+                                               const scalar_t upper,
+                                               const scalar_t tol = 1e-12,
+                                               const size_t max_iter = 200) {
+  size_t f_evals_used = 0;
+  // functor
+  auto f_lam = [&](auto x) {
+    const auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t a = lower, b = upper;
+  scalar_t val_a = f_lam(a), val_b = f_lam(b);
+  if (val_a * val_b >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  scalar_t c = a, val_c = val_a, s, val_s, d;
+  size_t iter = 0;
+  bool flag = true;
+  while (true) {
+    // inverse quadratic interpolation
+    if ((val_a != val_c) && (val_b != val_c)) {
+      s = ((a * val_b * val_c) / ((val_a - val_b) * (val_a - val_c))) +
+          ((b * val_a * val_c) / ((val_b - val_a) * (val_b - val_c))) +
+          ((c * val_a * val_b) / ((val_c - val_a) * (val_c - val_b)));
+    } else {
+      // otherwise do the secant method
+      s = b - val_b * ((b - a) / (val_b - val_a));
+    }
+    // bisection
+    if (!(s > (((3 * a) + b) / 4) && s < b) ||
+        (flag && (std::abs(s - b) >= (std::abs(b - c) / 2))) ||
+        (!flag && std::abs(s - b) >= (std::abs(c - d) / 2)) ||
+        (flag && std::abs(b - c) < tol) || (!flag && std::abs(c - d) < tol)) {
+      s = (a + b) / 2;
+      flag = true;
+    } else {
+      flag = false;
+    }
+    val_s = f_lam(s);
+    d = c;
+    c = b;
+    val_c = val_b;
+    if ((val_a * val_s) < 0) {
+      b = s;
+      val_b = val_s;
+    } else {
+      a = s;
+      val_a = val_s;
+    }
+    if (std::abs(val_a) < std::abs(val_b)) {
+      std::swap(a, b);
+      std::swap(val_a, val_b);
+    }
+    if (std::abs(val_b) < tol || std::abs(val_s) < tol ||
+        std::abs(b - a) < tol || iter >= max_iter) {
+      x = b;
+      return solver_status<scalar_t>(val_b, iter, f_evals_used);
+    }
+    iter++;
+  }
+}
+
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> ridders(Callable &f, scalar_t &x,
+                                                 const scalar_t lower,
+                                                 const scalar_t upper,
+                                                 const scalar_t tol = 1e-12,
+                                                 const scalar_t eps = 1e-12,
+                                                 const size_t max_iter = 5) {
+  size_t f_evals_used = 0;
+  // functor
+  auto f_lam = [&](auto x) {
+    const auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t a = lower, b = upper;
+  scalar_t val_a = f_lam(a), val_b = f_lam(b);
+  if (val_a * val_b >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  size_t iter = 0;
+  scalar_t mid, val_mid, new_mid;
+  while (true) {
+    // form an evaluate at midpoint
+    // evaluate at midpoint
+    mid = (a + b) / 2, val_mid = f_lam(mid);
+    // new iterate
+    new_mid =
+        mid + (mid - a) * (std::copysign(1., val_a - val_b) * val_mid /
+                           std::sqrt(std::pow(val_mid, 2) - (val_a * val_b)));
+    // check if equal zero, if yes return
+    scalar_t val_new_mid = f_lam(new_mid);
+    // check tolerances
+    if (std::min(std::abs(new_mid - a), std::abs(new_mid - b)) < tol ||
+        std::abs(val_new_mid) < eps || iter >= max_iter) {
+      x = new_mid;
+      return solver_status<scalar_t>(val_new_mid, iter, f_evals_used);
+    }
+    // not matching signs
+    if ((val_mid * val_new_mid) < 0) {
+      a = mid;
+      val_a = val_mid;
+      b = new_mid;
+      val_b = val_new_mid;
+      // likewise, not matching signs
+    } else if ((val_a * val_new_mid) < 0) {
+      a = new_mid;
+      val_a = val_new_mid;
+    } else {
+      b = new_mid;
+      val_b = val_new_mid;
+    }
+    iter++;
+  }
+}
+
+namespace nlsolver::internal::circulant {
+template <typename T, const size_t size>
+struct fixed_circulant {
+ private:
+  std::array<T, size> data = std::array<T, size>();
+  size_t circle_index = 0;
+
+ public:
+  T &operator[](const size_t i) {
+    return this->data[(this->circle_index + i) % size];
+  }
+  void push_back(const T item) {
+    this->data[this->circle_index] = item;
+    this->circle_index = (this->circle_index + 1) % size;
+  }
+  auto last() { return this->data[this->circle_index]; }
+};
+};  // namespace nlsolver::internal::circulant
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> tiruneh(
+    Callable &f, scalar_t &x,
+    const std::array<scalar_t, 3> x_k = {-100., 0., 100.},
+    const scalar_t eps = 1e-6, const scalar_t tol = 1e-12,
+    const size_t max_iter = 10) {
+  size_t f_evals_used = 0;
+  // functor
+  auto f_lam = [&](auto x) {
+    const auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  // initialize circulant
+  nlsolver::internal::circulant::fixed_circulant<scalar_t, 3> k, f_k;
+  for (auto &val : x_k) {
+    k.push_back(val);
+  }
+  for (size_t i = 0; i < 3; i++) {
+    f_k.push_back(f_lam(k[i]));
+  }
+  size_t iter = 0;
+  scalar_t temp = 0.;
+  while (true) {
+    if (std::abs(f_k.last()) < tol || iter > max_iter ||
+        std::abs(f_k[0] - f_k[1]) < eps) {
+      x = k.last();
+      return solver_status<scalar_t>(f_k.last(), iter, f_evals_used);
+    }
+    // iteration and replacement
+    temp = k[2] - (f_k[2] * (f_k[0] - f_k[1])) /
+                      (((f_k[0] - f_k[2]) / (k[0] - k[2]) * (f_k[0] - f_k[1])) -
+                       f_k[0] * (((f_k[0] - f_k[2]) / (k[0] - k[2])) -
+                                 ((f_k[1] - f_k[2]) / (k[1] - k[2]))));
+    // update
+    k.push_back(temp);
+    f_k.push_back(f_lam(temp));
+    iter++;
+  }
+}
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> itp(
+    Callable &f, scalar_t &x, const scalar_t lower, const scalar_t upper,
+    const scalar_t kappa1 = 0.3, const scalar_t kappa2 = 2.1,
+    const scalar_t n0 = 1, const scalar_t tol = 1e-12,
+    const scalar_t eps = 1e-12, const size_t max_iter = 200) {
+  size_t f_evals_used = 0;
+  // functor
+  auto f_lam = [&](auto x) {
+    const auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t a = lower, b = upper;
+  // standard bracketing condition
+  scalar_t val_a = f_lam(a), val_b = f_lam(b);
+  if (val_a * val_b >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  size_t iter = 0;
+  const scalar_t two_eps = 2 * eps;
+  const scalar_t n_max = std::log2((b - a) / two_eps) + n0;
+  scalar_t mid, r, delta, b_min_a, interp, sigma, temp, val_itp = 100000.0;
+  while (true) {
+    b_min_a = b - a;
+    if (b_min_a < two_eps || iter >= max_iter) {
+      x = (a + b) / 2.;
+      return solver_status<scalar_t>(val_itp, iter, f_evals_used);
+    }
+    mid = (a + b) / 2;
+    r = eps * std::pow(2, n_max - 1) - (b_min_a / 2);
+    delta = kappa1 * std::pow(b_min_a, kappa2);
+    // interpolate
+    interp = (val_b * a - val_a * b) / (val_b - val_a);
+    // truncate
+    temp = mid - interp;
+    sigma = (temp) > 0;
+    const bool project = temp <= r;
+    if (delta <= std::abs(temp)) {
+      interp += sigma * delta;
+    } else {
+      interp = mid;
+    }
+    // project
+    if (project) {
+      temp = interp;
+    } else {
+      temp = mid - sigma * r;
+    }
+    // update
+    val_itp = f_lam(temp);
+    if (val_itp > 0) {
+      b = temp;
+      val_b = val_itp;
+    } else if (val_itp < 0) {
+      a = temp;
+      val_a = val_itp;
+    } else {
+      x = temp;
+      return solver_status<scalar_t>(val_itp, iter, f_evals_used);
+    }
+    iter++;
+  }
+}
+
+template <typename Callable, typename scalar_t>
+[[maybe_unused]] solver_status<scalar_t> chandrupatla(
+    Callable &f, scalar_t &x, const scalar_t lower, const scalar_t upper,
+    const scalar_t eps_m = 1e-10, const scalar_t eps_a = 2e-10,
+    const size_t max_iter = 200) {
+  size_t f_evals_used = 0;
+  // functor
+  auto f_lam = [&](auto x) {
+    const auto val = f(x);
+    f_evals_used++;
+    return val;
+  };
+  scalar_t a = lower, b = upper, c = upper;
+  // standard bracketing condition
+  scalar_t val_a = f_lam(a), val_b = f_lam(b), val_c = upper;
+  if (val_a * val_b >= 0) {
+    std::cout << "Initial values do not bracket the root; exiting."
+              << std::endl;
+    return solver_status<scalar_t>(0, 0, f_evals_used);
+  }
+  size_t iter = 0;
+  scalar_t t = 0.5, x_t, val_t, x_m, val_m;
+  while (true) {
+    // use t to linearly interpolate between a and b,
+    // and evaluate this function as our newest estimate xt
+    x_t = b + t * (a - b);
+    val_t = f_lam(x_t);
+    // std::cout << "x_t: " << x_t << ", val t: "<< val_t << std::endl;
+    //  not matching signs
+    if ((val_t * val_b) < 0) {
+      c = a;
+      a = b;
+      val_c = val_a;
+      val_a = val_b;
+    } else {
+      c = b;
+      val_c = val_b;
+    }
+    b = x_t;
+    val_b = val_t;
+    // set xm so that f(xm) is the minimum magnitude of f(a) and f(b)
+    const bool b_smaller_a = std::abs(val_b) < std::abs(val_a);
+    x_m = b_smaller_a ? b : a;
+    val_m = b_smaller_a ? val_b : val_a;
+    // std::cout << "x_m: " << x_m << ", val m: "<< val_m << std::endl;
+    if (std::abs(val_m) < eps_a || iter > max_iter) {
+      x = x_m;
+      return solver_status<scalar_t>(val_m, iter, f_evals_used);
+    }
+    // Figure out values xi and phi to determine which method we should use next
+    const scalar_t tol = 2 * eps_m * std::abs(x_m) + eps_a;
+    const scalar_t t_lim = tol / std::abs(a - c);
+    if (t_lim > 0.5) {
+      // std::cout << "Hitting t lim" << std::endl;
+      x = x_m;
+      return solver_status<scalar_t>(val_m, iter, f_evals_used);
+    }
+    const scalar_t xi = (a - b) / (c - b);
+    const scalar_t phi = (val_a - val_b) / (val_c - val_b);
+    if ((std::pow(phi, 2) < xi) && (std::pow(1 - phi, 2) < (1 - xi))) {
+      // std::cout << "Doing inverse quadratic"<< std::endl;
+      t = val_a / (val_b - val_a) * val_c / (val_b - val_c) +
+          (c - a) / (b - a) * val_a / (val_c - val_a) * val_b / (val_c - val_b);
+    } else {
+      t = 0.5;
+    }
+    // limit to the range (tlim, 1-tlim)
+    t = std::min(1. - t_lim, std::max(t_lim, t));
+    iter++;
+  }
+}
+};  // namespace nlsolver::rootfinder
+
 namespace nlsolver::experimental {
 // TODO(JSzitas): WIP
 template <typename Callable, typename RNG, typename scalar_t = double>
@@ -4170,335 +4571,6 @@ class [[maybe_unused]] CMAES {
   }
 };
 };  // namespace nlsolver::experimental
-
-namespace nlsolver::experimental::rootfinder {
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> bisection(
-    Callable &f, scalar_t &x, const scalar_t lower = -100,
-    const scalar_t upper = 100, const scalar_t eps = 1e-6,
-    const size_t max_iter = 200) {
-  size_t f_evals_used = 0;
-  auto f_lam = [&](auto x) {
-    auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  scalar_t a = lower, b = upper;
-  if (a > b) {
-    std::swap(a, b);
-  }
-  if (f_lam(a) * f_lam(b) >= 0) {
-    std::cout << "Initial values do not bracket the root; exiting."
-              << std::endl;
-    return solver_status<scalar_t>(0, 0, f_evals_used);
-  }
-  scalar_t mid, val;
-  size_t iter = 0;
-  while (true) {
-    // define midpoint
-    mid = (a + b) / 2;
-    val = f_lam(mid);
-    if (std::abs(val) < eps || iter > max_iter) {
-      //; solution found
-      x = mid;
-      return solver_status<scalar_t>(val, iter, f_evals_used);
-    }
-    if (val > 0) {
-      b = mid;
-    } else if (val < 0) {
-      a = mid;
-    }
-    iter++;
-  }
-}
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> false_position(
-    Callable &f, scalar_t &x, const scalar_t lower = -100,
-    const scalar_t upper = 100, const scalar_t eps = 1e-6,
-    const size_t max_iter = 200) {
-  size_t f_evals_used = 0;
-  auto f_lam = [&](auto x) {
-    auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  scalar_t val_a = f_lam(lower), val_b = f_lam(upper);
-  if (val_a * val_b >= 0) {
-    std::cout << "Initial values do not bracket the root; exiting."
-              << std::endl;
-    return solver_status<scalar_t>(0, 0, f_evals_used);
-  }
-  scalar_t a = lower, b = upper, mid, val;
-  size_t iter = 0;
-  while (true) {
-    // define midpoint
-    mid = a + ((b - a) * val_a) / (val_a - val_b);
-    val = f_lam(mid);
-    if (std::abs(val) < eps || iter > max_iter) {
-      //; solution found
-      x = mid;
-      return solver_status<scalar_t>(val, iter, f_evals_used);
-    }
-    if (val < 0) {
-      a = mid;
-      val_a = val;
-    } else if (val > 0) {
-      b = mid;
-      val_b = mid;
-    }
-    iter++;
-  }
-}
-
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> brent(Callable &f, scalar_t &x,
-                                               const scalar_t lower,
-                                               const scalar_t upper,
-                                               const scalar_t tol = 1e-12,
-                                               const size_t max_iter = 200) {
-  size_t f_evals_used = 0;
-  // functor
-  auto f_lam = [&](auto x) {
-    const auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  scalar_t a = lower, b = upper;
-  scalar_t val_a = f_lam(a), val_b = f_lam(b);
-  if (val_a * val_b >= 0) {
-    std::cout << "Initial values do not bracket the root; exiting."
-              << std::endl;
-    return solver_status<scalar_t>(0, 0, f_evals_used);
-  }
-  scalar_t c = a, val_c = val_a, s, val_s, d;
-  size_t iter = 0;
-  bool flag = true;
-  while (true) {
-    // inverse quadratic interpolation
-    if ((val_a != val_c) && (val_b != val_c)) {
-      s = ((a * val_b * val_c) / ((val_a - val_b) * (val_a - val_c))) +
-          ((b * val_a * val_c) / ((val_b - val_a) * (val_b - val_c))) +
-          ((c * val_a * val_b) / ((val_c - val_a) * (val_c - val_b)));
-    } else {
-      // otherwise do the secant method
-      s = b - val_b * ((b - a) / (val_b - val_a));
-    }
-    // bisection
-    if (!(s > (((3 * a) + b) / 4) && s < b) ||
-        (flag && (std::abs(s - b) >= (std::abs(b - c) / 2))) ||
-        (!flag && std::abs(s - b) >= (std::abs(c - d) / 2)) ||
-        (flag && std::abs(b - c) < tol) || (!flag && std::abs(c - d) < tol)) {
-      s = (a + b) / 2;
-      flag = true;
-    } else {
-      flag = false;
-    }
-    val_s = f_lam(s);
-    d = c;
-    c = b;
-    val_c = val_b;
-    if ((val_a * val_s) < 0) {
-      b = s;
-      val_b = val_s;
-    } else {
-      a = s;
-      val_a = val_s;
-    }
-    if (std::abs(val_a) < std::abs(val_b)) {
-      std::swap(a, b);
-      std::swap(val_a, val_b);
-    }
-    if (std::abs(val_b) < tol || std::abs(val_s) < tol ||
-        std::abs(b - a) < tol || iter >= max_iter) {
-      x = b;
-      return solver_status<scalar_t>(val_b, iter, f_evals_used);
-    }
-    iter++;
-  }
-}
-
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> ridders(Callable &f, scalar_t &x,
-                                                 const scalar_t lower,
-                                                 const scalar_t upper,
-                                                 const scalar_t tol = 1e-12,
-                                                 const scalar_t eps = 1e-12,
-                                                 const size_t max_iter = 5) {
-  size_t f_evals_used = 0;
-  // functor
-  auto f_lam = [&](auto x) {
-    const auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  scalar_t a = lower, b = upper;
-  scalar_t val_a = f_lam(a), val_b = f_lam(b);
-  if (val_a * val_b >= 0) {
-    std::cout << "Initial values do not bracket the root; exiting."
-              << std::endl;
-    return solver_status<scalar_t>(0, 0, f_evals_used);
-  }
-  size_t iter = 0;
-  scalar_t mid, val_mid, new_mid;
-  while (true) {
-    // form an evaluate at midpoint
-    // evaluate at midpoint
-    mid = (a + b) / 2, val_mid = f_lam(mid);
-    // new iterate
-    new_mid =
-        mid + (mid - a) * (std::copysign(1., val_a - val_b) * val_mid /
-                           std::sqrt(std::pow(val_mid, 2) - (val_a * val_b)));
-    // check if equal zero, if yes return
-    scalar_t val_new_mid = f_lam(new_mid);
-    // check tolerances
-    if (std::min(std::abs(new_mid - a), std::abs(new_mid - b)) < tol ||
-        std::abs(val_new_mid) < eps || iter >= max_iter) {
-      x = new_mid;
-      return solver_status<scalar_t>(val_new_mid, iter, f_evals_used);
-    }
-    // not matching signs
-    if ((val_mid * val_new_mid) < 0) {
-      a = mid;
-      val_a = val_mid;
-      b = new_mid;
-      val_b = val_new_mid;
-      // likewise, not matching signs
-    } else if ((val_a * val_new_mid) < 0) {
-      a = new_mid;
-      val_a = val_new_mid;
-    } else {
-      b = new_mid;
-      val_b = val_new_mid;
-    }
-    iter++;
-  }
-}
-
-namespace circulant {
-template <typename T, const size_t size>
-struct fixed_circulant {
- private:
-  std::array<T, size> data = std::array<T, size>();
-  size_t circle_index = 0;
-
- public:
-  T &operator[](const size_t i) {
-    return this->data[(this->circle_index + i) % size];
-  }
-  void push_back(const T item) {
-    this->data[this->circle_index] = item;
-    this->circle_index = (this->circle_index + 1) % size;
-  }
-  auto last() { return this->data[this->circle_index]; }
-};
-};  // namespace circulant
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> tiruneh(
-    Callable &f, scalar_t &x,
-    const std::array<scalar_t, 3> x_k = {-100., 0., 100.},
-    const scalar_t eps = 1e-6, const scalar_t tol = 1e-12,
-    const size_t max_iter = 10) {
-  size_t f_evals_used = 0;
-  // functor
-  auto f_lam = [&](auto x) {
-    const auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  // initialize circulant
-  circulant::fixed_circulant<scalar_t, 3> k, f_k;
-  for (auto &val : x_k) {
-    k.push_back(val);
-  }
-  for (size_t i = 0; i < 3; i++) {
-    f_k.push_back(f_lam(k[i]));
-  }
-  size_t iter = 0;
-  scalar_t temp = 0.;
-  while (true) {
-    if (std::abs(f_k.last()) < tol || iter > max_iter ||
-        std::abs(f_k[0] - f_k[1]) < eps) {
-      x = k.last();
-      return solver_status<scalar_t>(f_k.last(), iter, f_evals_used);
-    }
-    // iteration and replacement
-    temp = k[2] - (f_k[2] * (f_k[0] - f_k[1])) /
-                      (((f_k[0] - f_k[2]) / (k[0] - k[2]) * (f_k[0] - f_k[1])) -
-                       f_k[0] * (((f_k[0] - f_k[2]) / (k[0] - k[2])) -
-                                 ((f_k[1] - f_k[2]) / (k[1] - k[2]))));
-    // update
-    k.push_back(temp);
-    f_k.push_back(f_lam(temp));
-    iter++;
-  }
-}
-template <typename Callable, typename scalar_t>
-[[maybe_unused]] solver_status<scalar_t> itp(
-    Callable &f, scalar_t &x, const scalar_t lower, const scalar_t upper,
-    const scalar_t kappa1 = 0.3, const scalar_t kappa2 = 2.1,
-    const scalar_t n0 = 1, const scalar_t tol = 1e-12,
-    const scalar_t eps = 1e-12, const size_t max_iter = 200) {
-  size_t f_evals_used = 0;
-  // functor
-  auto f_lam = [&](auto x) {
-    const auto val = f(x);
-    f_evals_used++;
-    return val;
-  };
-  scalar_t a = lower, b = upper;
-  // standard bracketing condition
-  scalar_t val_a = f_lam(a), val_b = f_lam(b);
-  if (val_a * val_b >= 0) {
-    std::cout << "Initial values do not bracket the root; exiting."
-              << std::endl;
-    return solver_status<scalar_t>(0, 0, f_evals_used);
-  }
-  size_t iter = 0;
-  const scalar_t two_eps = 2 * eps;
-  const scalar_t n_max = std::log2((b - a) / two_eps) + n0;
-  scalar_t mid, r, delta, b_min_a, interp, sigma, temp, val_itp = 100000.0;
-  while (true) {
-    b_min_a = b - a;
-    if (b_min_a < two_eps || iter >= max_iter) {
-      x = (a + b) / 2.;
-      return solver_status<scalar_t>(val_itp, iter, f_evals_used);
-    }
-    mid = (a + b) / 2;
-    r = eps * std::pow(2, n_max - 1) - (b_min_a / 2);
-    delta = kappa1 * std::pow(b_min_a, kappa2);
-    // interpolate
-    interp = (val_b * a - val_a * b) / (val_b - val_a);
-    // truncate
-    temp = mid - interp;
-    sigma = (temp) > 0;
-    const bool project = temp <= r;
-    if (delta <= std::abs(temp)) {
-      interp += sigma * delta;
-    } else {
-      interp = mid;
-    }
-    // project
-    if (project) {
-      temp = interp;
-    } else {
-      temp = mid - sigma * r;
-    }
-    // update
-    val_itp = f_lam(temp);
-    if (val_itp > 0) {
-      b = temp;
-      val_b = val_itp;
-    } else if (val_itp < 0) {
-      a = temp;
-      val_a = val_itp;
-    } else {
-      x = temp;
-      return solver_status<scalar_t>(val_itp, iter, f_evals_used);
-    }
-    iter++;
-  }
-}
-};  // namespace nlsolver::experimental::rootfinder
 
 #if defined(__clang__)
 #pragma clang diagnostic pop

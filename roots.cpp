@@ -19,12 +19,13 @@
 
 // experimental solvers
 // uni-variate optimizer
-using nlsolver::experimental::rootfinder::bisection;
-using nlsolver::experimental::rootfinder::brent;
-using nlsolver::experimental::rootfinder::false_position;
-using nlsolver::experimental::rootfinder::itp;
-using nlsolver::experimental::rootfinder::ridders;
-using nlsolver::experimental::rootfinder::tiruneh;
+using nlsolver::rootfinder::bisection;
+using nlsolver::rootfinder::brent;
+using nlsolver::rootfinder::chandrupatla;
+using nlsolver::rootfinder::false_position;
+using nlsolver::rootfinder::itp;
+using nlsolver::rootfinder::ridders;
+using nlsolver::rootfinder::tiruneh;
 
 int main() {
   // uni-variate optimization example
@@ -72,5 +73,10 @@ int main() {
   std::cout << "ITP" << std::endl;
   x = p.lower();
   itp(p, x, p.lower(), p.upper()).print();
+  std::cout << "x: " << x << std::endl;
+
+  std::cout << "Chandrupatla" << std::endl;
+  x = p.lower();
+  chandrupatla(p, x, p.lower(), p.upper()).print();
   std::cout << "x: " << x << std::endl;
 }
