@@ -53,7 +53,6 @@ void print_vector(T x) {
   }
   std::cout << "\n";
 }
-
 // mostly dot products and other fun vector math stuff
 namespace nlsolver::math {
 template <typename T>
@@ -1174,7 +1173,6 @@ template <>
 }
 #endif
 }  // namespace nlsolver::math
-
 namespace nlsolver::rng {
 #define MAX_SIZE_64_BIT_UINT (18446744073709551615U)
 template <typename scalar_t = float>
@@ -1229,7 +1227,7 @@ struct [[maybe_unused]] halton {
 template <typename scalar_t = float>
 struct [[maybe_unused]] recurrent {
   recurrent<scalar_t>() : seed_(0.5), alpha_(0.618034), z_(alpha_ + seed_) {
-    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
+    this->z_ -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
   }
   [[maybe_unused]] explicit recurrent(scalar_t seed)
       : seed_(seed), alpha_(0.618034), z_(alpha_ + seed_) {
@@ -1238,7 +1236,7 @@ struct [[maybe_unused]] recurrent {
   scalar_t yield() {
     this->z_ += this->alpha_;
     // a slightly evil way to do z % 1 with floats
-    this->z -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
+    this->z_ -= static_cast<scalar_t>(static_cast<uint64_t>(this->z_));
     return this->z_;
   }
   scalar_t operator()() { return this->yield(); }
@@ -1311,7 +1309,7 @@ struct xoshiro {
 
     return (scalar_t)result / (scalar_t)MAX_SIZE_64_BIT_UINT;
   }
-  uint64_t static bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
+  uint64_t bitwise_rotate(uint64_t x, int bits, int rotate_bits) {
     return (x << rotate_bits) | (x >> (bits - rotate_bits));
   }
   scalar_t operator()() { return this->yield(); }
@@ -1382,7 +1380,6 @@ struct xorshift {
   uint64_t x[2]{};
 };
 }  // namespace nlsolver::rng
-
 namespace nlsolver::finite_difference {
 // The 'accuracy' can be 0, 1, 2, 3.
 template <typename Callable, typename scalar_t, const size_t accuracy = 0>
@@ -1519,7 +1516,6 @@ void finite_difference_hessian(Callable &f, std::vector<scalar_t> &x,  // NOLINT
   }
 }
 }  // namespace nlsolver::finite_difference
-
 namespace nlsolver::linesearch {
 template <typename scalar_t>
 scalar_t max_abs(scalar_t x, scalar_t y, scalar_t z) {
@@ -1894,7 +1890,6 @@ template <typename Callable, typename Grad, typename scalar_t = double>
   return alpha_;
 }
 }  // namespace nlsolver::linesearch
-
 namespace nlsolver {
 template <typename scalar_t = double>
 inline scalar_t max_abs_vec(const std::vector<scalar_t> &x) {
@@ -1907,7 +1902,6 @@ inline scalar_t max_abs_vec(const std::vector<scalar_t> &x) {
   }
   return result;
 }
-
 template <typename scalar_t = double>
 struct simplex {
   explicit simplex<scalar_t>(const size_t i = 0) {
@@ -4281,7 +4275,6 @@ template <typename Callable, typename scalar_t>
     // and evaluate this function as our newest estimate xt
     x_t = b + t * (a - b);
     val_t = f_lam(x_t);
-    // std::cout << "x_t: " << x_t << ", val t: "<< val_t << std::endl;
     //  not matching signs
     if ((val_t * val_b) < 0) {
       c = a;
@@ -4298,7 +4291,6 @@ template <typename Callable, typename scalar_t>
     const bool b_smaller_a = std::abs(val_b) < std::abs(val_a);
     x_m = b_smaller_a ? b : a;
     val_m = b_smaller_a ? val_b : val_a;
-    // std::cout << "x_m: " << x_m << ", val m: "<< val_m << std::endl;
     if (std::abs(val_m) < eps_a || iter > max_iter) {
       x = x_m;
       return solver_status<scalar_t>(val_m, iter, f_evals_used);
@@ -4307,20 +4299,19 @@ template <typename Callable, typename scalar_t>
     const scalar_t tol = 2 * eps_m * std::abs(x_m) + eps_a;
     const scalar_t t_lim = tol / std::abs(a - c);
     if (t_lim > 0.5) {
-      // std::cout << "Hitting t lim" << std::endl;
       x = x_m;
       return solver_status<scalar_t>(val_m, iter, f_evals_used);
     }
     const scalar_t xi = (a - b) / (c - b);
     const scalar_t phi = (val_a - val_b) / (val_c - val_b);
+    // inverse quadratic extrapolation bit
     if ((std::pow(phi, 2) < xi) && (std::pow(1 - phi, 2) < (1 - xi))) {
-      // std::cout << "Doing inverse quadratic"<< std::endl;
       t = val_a / (val_b - val_a) * val_c / (val_b - val_c) +
           (c - a) / (b - a) * val_a / (val_c - val_a) * val_b / (val_c - val_b);
     } else {
       t = 0.5;
     }
-    // limit to the range (tlim, 1-tlim)
+    // limit range
     t = std::min(1. - t_lim, std::max(t_lim, t));
     iter++;
   }
@@ -4494,9 +4485,10 @@ class [[maybe_unused]] CMAES {
       // carried out of it is == zero, which might be entirely redundant if this
       // did not rely on iter, line 3804 could be constexpr, but I am not
       // convinced its worthwhile
+      const auto ps_norm = nlsolver::math::norm(ps.data(), n);
       const bool hsig =
-          (nlsolver::math::norm(ps.data(), n) /
-           std::sqrt(std::pow(1 - (1. - cs), (2 * (iter + 1))))) < hsig_thr;
+          (ps_norm / std::sqrt(std::pow(1 - (1. - cs), (2 * (iter + 1))))) <
+          hsig_thr;
       const scalar_t cc_mult = (1. - cc);
       for (size_t i = 0; i < n; i++) {
         pc *= cc_mult;
@@ -4522,9 +4514,23 @@ class [[maybe_unused]] CMAES {
         // the product temp * temp' can probably be avoided altogether seeing we
         // are writing to a matrix
         // C += cmu * w[k] * temp * temp.transpose();
+        // temp_vec is re-used here to store the temporary result of BD *
+        // particles_z[k]
+        for (size_t j = 0; j < n; ++j) {
+          temp_vec[j] = 0.0;
+          for (size_t i = 0; i < n; ++i) {
+            temp_vec[j] += BD[j * n + i] * particles_z[k * n + i];
+          }
+        }
+        // Efficiently compute the outer product and update C
+        for (size_t i = 0; i < n; ++i) {
+          for (size_t j = 0; j < n; ++j) {
+            C[i * n + j] += cmu * w[k] * temp_vec[i] * temp_vec[j];
+          }
+        }
       }
       // ps norm can be precomputed once, it is also used on line 3950
-      sigma *= exp((cs / ds) * ((ps).norm() / chi - 1.));
+      sigma *= exp((cs / ds) * (ps_norm / chi - 1.));
       // run new evaluations
       if ((iter - eigen_last_eval) == eigen_next_eval) {
         // Update B and D by running eigensolver
